@@ -1,5 +1,3 @@
-# block.py
-
 import hashlib
 import time
 from transaction import Transaction
@@ -26,15 +24,4 @@ class Block:
         transactions_str = ''.join([f'{tx.sender}-{tx.receiver}-{tx.tx_id}-{tx.amount}' for tx in self.transactions])
         block_data = f'{self.epoch}{self.previous_hash}{transactions_str}{self.timestamp}'
         return hashlib.sha256(block_data.encode()).hexdigest()
-
-    def generate_block(self, epoch: int, transactions: list[Transaction], previous_hash: bytes):
-        """
-        Generates a new block with the given transactions.
-
-        :param epoch: The epoch number.
-        :param transactions: The list of transactions to include in the block.
-        :param previous_hash: The hash of the previous block.
-        :return: A Block object.
-        """
-        return Block(epoch=epoch, previous_hash=previous_hash, transactions=transactions)
 

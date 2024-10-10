@@ -1,5 +1,3 @@
-# message.py
-
 from block import Block
 
 class MessageType:

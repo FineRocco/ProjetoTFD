@@ -1,5 +1,3 @@
-# transaction.py
-
 class Transaction:
     def __init__(self, sender: int, receiver: int, tx_id: int, amount: float):
         """

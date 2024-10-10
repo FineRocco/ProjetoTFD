@@ -81,9 +81,16 @@ class Node(threading.Thread):
         if longest_notarized_block and block.chain_length <= longest_notarized_block.chain_length:
             return  # Do not vote for shorter or equal-length chains
         
+        # Ensure the node only votes once for each block in each epoch
         if block.epoch not in self.votes:
             self.votes[block.epoch] = []
 
+        # Check if this node has already voted for this block in this epoch
+        if any(voted_block.hash == block.hash for voted_block in self.votes[block.epoch]):
+            print(f"Node {self.node_id} has already voted for Block {block.hash} in epoch {block.epoch}")
+            return  # Node has already voted for this block in this epoch
+
+        # Add the block to the list of voted blocks for this epoch
         self.votes[block.epoch].append(block)
         print(f"Node {self.node_id} votes for Block {block.hash} in epoch {block.epoch}")
 
@@ -140,8 +147,8 @@ class Node(threading.Thread):
             echo_message = Message.create_echo_message(message, self.node_id)
             self.broadcast_message(echo_message)
 
-        elif message.msg_type == MessageType.ECHO:
-            print(f"Node {self.node_id} received echo for message from node {message.sender}")
+        #elif message.msg_type == MessageType.ECHO:
+            #print(f"Node {self.node_id} received echo for message from node {message.sender}")
             # Echo handling logic can be added here if needed
 
     def broadcast_message(self, message):
@@ -184,3 +191,5 @@ class Node(threading.Thread):
         # Return the block at the tip of the longest notarized chain
         # which is the most recent block in the longest consecutive notarized chain
         return chain[-1] if chain else None
+    
+

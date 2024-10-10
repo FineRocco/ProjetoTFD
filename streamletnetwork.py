@@ -73,6 +73,7 @@ class StreamletNetwork:
 
             # Wait for the epoch duration (2∆) before starting the next epoch
             time.sleep(self.epoch_duration)
+        
 
     def get_next_tx_id(self):
         """
@@ -83,3 +84,5 @@ class StreamletNetwork:
         with self.tx_id_lock:
             self.global_tx_id += 1
             return self.global_tx_id
+        
+
