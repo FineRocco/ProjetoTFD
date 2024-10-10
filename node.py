@@ -35,20 +35,6 @@ class Node(threading.Thread):
             self.generate_random_transaction()
             time.sleep(random.uniform(1, 3))  # Sleep for 1 to 3 seconds
 
-    def generate_random_transaction(self):
-        """
-        Generates a random transaction and adds it to the pending transaction list.
-        """
-        sender = random.randint(0, self.total_nodes - 1)
-        receiver = random.randint(0, self.total_nodes - 1)
-        amount = round(random.uniform(1, 100), 2)
-
-        if sender != receiver:
-            tx_id = self.network.get_next_tx_id()  # Fetch globally unique ID
-            tx = Transaction(sender, receiver, tx_id, amount)
-            self.pending_transactions.append(tx)
-            print(f"Node {self.node_id} generated transaction: {tx.tx_id}")
-
     def propose_block(self, epoch):
         """
         Proposes a new block at the start of an epoch.
@@ -62,13 +48,13 @@ class Node(threading.Thread):
             self.pending_transactions = []  # Clear after proposing
             print(f"Node {self.node_id} proposes Block: {new_block.hash}")
         
-            # Create a Propose message
-            propose_message = Message.create_propose_message(new_block, self.node_id)
+        # Create a Propose message
+        propose_message = Message.create_propose_message(new_block, self.node_id)
 
-            # Broadcast the Propose message to all other nodes
-            self.broadcast_message(propose_message)
+        # Broadcast the Propose message to all other nodes
+        self.broadcast_message(propose_message)
 
-            return new_block
+        return new_block
 
     def vote_on_block(self, block):
         """
@@ -81,18 +67,19 @@ class Node(threading.Thread):
         if longest_notarized_block and block.chain_length <= longest_notarized_block.chain_length:
             return  # Do not vote for shorter or equal-length chains
         
-        # Ensure the node only votes once for each block in each epoch
-        if block.epoch not in self.votes:
-            self.votes[block.epoch] = []
+        with self.lock:
+            # Ensure that the votes list for this epoch is initialized
+            if block.epoch not in self.votes:
+                self.votes[block.epoch] = []
 
-        # Check if this node has already voted for this block in this epoch
-        if any(voted_block.hash == block.hash for voted_block in self.votes[block.epoch]):
-            print(f"Node {self.node_id} has already voted for Block {block.hash} in epoch {block.epoch}")
-            return  # Node has already voted for this block in this epoch
+            # Check if this node has already voted for this block in this epoch
+            if any(voted_block.hash == block.hash for voted_block in self.votes[block.epoch]):
+                print(f"Node {self.node_id} has already voted for Block {block.hash} in epoch {block.epoch}")
+                return  # Node has already voted for this block in this epoch
 
-        # Add the block to the list of voted blocks for this epoch
-        self.votes[block.epoch].append(block)
-        print(f"Node {self.node_id} votes for Block {block.hash} in epoch {block.epoch}")
+            # Add the block to the list of voted blocks for this epoch
+            self.votes[block.epoch].append(block)
+            print(f"Node {self.node_id} votes for Block {block.hash} in epoch {block.epoch}")
 
         # Broadcast vote to all other nodes
         vote_message = Message.create_vote_message(block, self.node_id)
@@ -106,24 +93,46 @@ class Node(threading.Thread):
         
         :param block: The block to notarize.
         """
-        epoch_votes = self.votes.get(block.epoch, [])
-        if len(epoch_votes) > self.total_nodes // 2:
-            self.notarized_blocks[block.epoch] = block
-            print(f"Block {block.hash} notarized in epoch {block.epoch}")
-            self.finalize_blocks()
+        with self.lock:
+            epoch_votes = self.votes.get(block.epoch, [])
+            unique_vote_count = len({b.hash for b in epoch_votes})  # Count unique votes by block hash
+            
+            print(f"Total unique votes for epoch {block.epoch}: {unique_vote_count} (n/2 = {self.total_nodes // 2})") #debugging
+            
+            if unique_vote_count > self.total_nodes // 2:
+                self.notarized_blocks[block.epoch] = block
+                print(f"Block {block.hash} notarized in epoch {block.epoch}")
+        
+        self.finalize_blocks()
+
 
     def finalize_blocks(self):
         """
         Finalizes blocks when three consecutive blocks are notarized.
         """
-        # Finalize logic: three consecutive notarized blocks
-        notarized_epochs = sorted(self.notarized_blocks.keys())
-        for i in range(1, len(notarized_epochs) - 1):
-            if notarized_epochs[i] == notarized_epochs[i-1] + 1 and notarized_epochs[i+1] == notarized_epochs[i] + 1:
-                # Finalize the second block in this sequence
-                finalized_block = self.notarized_blocks[notarized_epochs[i]]
-                print(f"Node {self.node_id} finalizes Block {finalized_block.hash}")
-                self.blockchain.append(finalized_block)
+        with self.lock:
+            # Finalize logic: three consecutive notarized blocks
+            notarized_epochs = sorted(self.notarized_blocks.keys())
+            for i in range(1, len(notarized_epochs) - 1):
+                if notarized_epochs[i] == notarized_epochs[i-1] + 1 and notarized_epochs[i+1] == notarized_epochs[i] + 1:
+                    # Finalize the second block in this sequence
+                    finalized_block = self.notarized_blocks[notarized_epochs[i]]
+                    print(f"Node {self.node_id} finalizes Block {finalized_block.hash}")
+                    self.blockchain.append(finalized_block)
+
+    def generate_random_transaction(self):
+        """
+        Generates a random transaction and adds it to the pending transaction list.
+        """
+        sender = random.randint(0, self.total_nodes - 1)
+        receiver = random.randint(0, self.total_nodes - 1)
+        amount = round(random.uniform(1, 100), 2)
+
+        if sender != receiver:
+            tx_id = self.network.get_next_tx_id()  # Fetch globally unique ID
+            tx = Transaction(sender, receiver, tx_id, amount)
+            self.pending_transactions.append(tx)
+            print(f"Node {self.node_id} generated transaction: {tx.tx_id}")
 
     def receive_message(self, message):
         """
@@ -192,4 +201,22 @@ class Node(threading.Thread):
         # which is the most recent block in the longest consecutive notarized chain
         return chain[-1] if chain else None
     
+    def display_blockchain(self):
+        """
+        Displays the current state of the blockchain for this node.
+        """
+        if not self.blockchain:
+            print(f"Node {self.node_id}: Blockchain is empty.")
+            return
+
+        print(f"Node {self.node_id}: Current Blockchain:")
+        for index, block in enumerate(self.blockchain):
+            print(f"Block {index + 1}:")
+            print(f"  Hash: {block.hash}")
+            print(f"  Previous Hash: {block.previous_hash}")
+            print(f"  Epoch: {block.epoch}")
+            print(f"  Transactions: {len(block.transactions)} transactions")
+            for tx in block.transactions:
+                print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
+            print("-" * 40)  # Separator for each block
 

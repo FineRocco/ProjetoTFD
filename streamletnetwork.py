@@ -74,6 +74,10 @@ class StreamletNetwork:
             # Wait for the epoch duration (2∆) before starting the next epoch
             time.sleep(self.epoch_duration)
         
+        # After all epochs have completed, print the final blockchain for each node
+        print("\n=== Final Blockchain for each node ===")
+        for node in self.nodes:
+            node.display_blockchain()
 
     def get_next_tx_id(self):
         """
