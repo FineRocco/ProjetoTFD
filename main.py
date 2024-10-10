@@ -3,7 +3,7 @@ from streamletnetwork import StreamletNetwork
 def main():
     # Initialize the network with 5 nodes
     num_nodes = 5
-    total_epochs = 10
+    total_epochs = 3
 
     print(f"Starting Streamlet Protocol with {num_nodes} nodes and {total_epochs} epochs.")
 

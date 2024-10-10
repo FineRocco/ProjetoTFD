@@ -61,6 +61,13 @@ class Node(threading.Thread):
             new_block = Block(epoch, previous_hash, self.pending_transactions)
             self.pending_transactions = []  # Clear after proposing
             print(f"Node {self.node_id} proposes Block: {new_block.hash}")
+        
+            # Create a Propose message
+            propose_message = Message.create_propose_message(new_block, self.node_id)
+
+            # Broadcast the Propose message to all other nodes
+            self.broadcast_message(propose_message)
+
             return new_block
 
     def vote_on_block(self, block):
@@ -81,10 +88,8 @@ class Node(threading.Thread):
         print(f"Node {self.node_id} votes for Block {block.hash} in epoch {block.epoch}")
 
         # Broadcast vote to all other nodes
-        vote_message = Message(MessageType.VOTE, block, self.node_id)
-        for node in self.network.nodes:
-            if node.node_id != self.node_id:
-                node.receive_message(vote_message)
+        vote_message = Message.create_vote_message(block, self.node_id)
+        self.broadcast_message(vote_message)
         
         return vote_message
 
@@ -122,11 +127,33 @@ class Node(threading.Thread):
         if message.msg_type == MessageType.PROPOSE:
             print(f"Node {self.node_id} received proposed Block {message.content.hash}")
             self.vote_on_block(message.content)
+
+            # Send Echo message to other nodes after receiving a Propose message
+            echo_message = Message.create_echo_message(message, self.node_id)
+            self.broadcast_message(echo_message)
+
         elif message.msg_type == MessageType.VOTE:
             print(f"Node {self.node_id} received vote for Block {message.content.hash}")
             self.notarize_block(message.content)
+
+            # Send Echo message to other nodes after receiving a Vote message
+            echo_message = Message.create_echo_message(message, self.node_id)
+            self.broadcast_message(echo_message)
+
         elif message.msg_type == MessageType.ECHO:
-            print(f"Node {self.node_id} received echo for message {message.sender}")
+            print(f"Node {self.node_id} received echo for message from node {message.sender}")
+            # Echo handling logic can be added here if needed
+
+    def broadcast_message(self, message):
+        """
+        Sends a message to all other nodes in the network.
+        
+        :param message: The message to broadcast.
+        """
+        for node in self.network.nodes:
+            if node.node_id != self.node_id:
+                node.receive_message(message)
+
 
     def get_longest_notarized_chain(self):
         """

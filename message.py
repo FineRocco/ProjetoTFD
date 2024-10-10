@@ -42,10 +42,9 @@ class Message:
         """
         # Create a message with the VOTE type and send the block without its transactions
         empty_block = Block(
-            hash=block.hash,
-            epoch=block.epoch,
-            length=block.length,
-            transactions=[]  # Remove transactions for voting
+            epoch=block.epoch,               # The epoch remains the same
+            previous_hash=block.previous_hash,  # The previous hash remains the same
+            transactions=[]                  # Remove transactions for voting
         )
         return Message(MessageType.VOTE, empty_block, sender)
 
