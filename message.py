@@ -17,7 +17,7 @@ class Message:
         :param sender: The ID of the sender node.
         """
         self.msg_type = msg_type
-        self.content = content
+        self.content = content  # This can either be a Block or a Message
         self.sender = sender
 
     @staticmethod
@@ -29,8 +29,7 @@ class Message:
         :param sender: The sender node ID.
         :return: A Message object.
         """
-        # To Do: Implement propose message creation
-        pass
+        return Message(MessageType.PROPOSE, block, sender)
 
     @staticmethod
     def create_vote_message(block: Block, sender: int):
@@ -41,8 +40,14 @@ class Message:
         :param sender: The sender node ID.
         :return: A Message object.
         """
-        # To Do: Implement vote message creation
-        pass
+        # Create a message with the VOTE type and send the block without its transactions
+        empty_block = Block(
+            hash=block.hash,
+            epoch=block.epoch,
+            length=block.length,
+            transactions=[]  # Remove transactions for voting
+        )
+        return Message(MessageType.VOTE, empty_block, sender)
 
     @staticmethod
     def create_echo_message(message, sender: int):
@@ -53,5 +58,5 @@ class Message:
         :param sender: The sender node ID.
         :return: A Message object.
         """
-        # To Do: Implement echo message creation
-        pass
+        # Echoing an existing message
+        return Message(MessageType.ECHO, message, sender)

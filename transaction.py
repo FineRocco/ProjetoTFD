@@ -15,15 +15,3 @@ class Transaction:
         self.tx_id = tx_id
         self.amount = amount
 
-    @staticmethod
-    def generate_transaction(sender: int, receiver: int, amount: float):
-        """
-        Generates a new transaction with a unique transaction id.
-
-        :param sender: The sender of the transaction.
-        :param receiver: The receiver of the transaction.
-        :param amount: The amount to be transferred.
-        :return: A Transaction object.
-        """
-        # To Do: Implement a unique transaction ID generation logic
-        pass
