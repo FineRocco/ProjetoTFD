@@ -25,28 +25,25 @@ class Node(threading.Thread):
         self.network = network
         self.running = True
         self.lock = threading.Lock()
-    
-    def run(self):
-        """
-        The main loop of the node. Generates random transactions periodically.
-        """
-        while self.running:
-            # Simulate random transaction generation
-            self.generate_random_transaction()
-            time.sleep(random.uniform(1, 3))  # Sleep for 1 to 3 seconds
 
     def propose_block(self, epoch):
         """
         Proposes a new block at the start of an epoch.
         :param epoch: The current epoch number.
         """
+        if self.node_id != self.network.leader:
+            print(f"Node {self.node_id} is not the leader for epoch {epoch}, cannot propose a block.")
+            return None
+        
+        # Select the longest notarized chain
+        previous_block = self.get_longest_notarized_chain()
+        previous_hash = previous_block.hash if previous_block else b'0' * 20
+
         with self.lock:
-            # Select the longest notarized chain
-            previous_block = self.get_longest_notarized_chain()
-            previous_hash = previous_block.hash if previous_block else '0'
             new_block = Block(epoch, previous_hash, self.pending_transactions)
             self.pending_transactions = []  # Clear after proposing
-            print(f"Node {self.node_id} proposes Block: {new_block.hash}")
+
+        print(f"Node {self.node_id} proposes Block: {new_block.hash.hex()}")
         
         # Create a Propose message
         propose_message = Message.create_propose_message(new_block, self.node_id)
@@ -64,7 +61,7 @@ class Node(threading.Thread):
         :return: A vote message.
         """
         longest_notarized_block = self.get_longest_notarized_chain()
-        if longest_notarized_block and block.chain_length <= longest_notarized_block.chain_length:
+        if longest_notarized_block and block.length <= longest_notarized_block.length:
             return  # Do not vote for shorter or equal-length chains
         
         with self.lock:
@@ -74,12 +71,13 @@ class Node(threading.Thread):
 
             # Check if this node has already voted for this block in this epoch
             if any(voted_block.hash == block.hash for voted_block in self.votes[block.epoch]):
-                print(f"Node {self.node_id} has already voted for Block {block.hash} in epoch {block.epoch}")
+                print(f"Node {self.node_id} has already voted for Block {block.hash.hex()} in epoch {block.epoch}")
                 return  # Node has already voted for this block in this epoch
 
             # Add the block to the list of voted blocks for this epoch
             self.votes[block.epoch].append(block)
-            print(f"Node {self.node_id} votes for Block {block.hash} in epoch {block.epoch}")
+            block.votes += 1  # Increment the block's vote count
+            print(f"Node {self.node_id} voted for Block {block.hash.hex()} in epoch {block.epoch}")
 
         # Broadcast vote to all other nodes
         vote_message = Message.create_vote_message(block, self.node_id)
@@ -93,15 +91,18 @@ class Node(threading.Thread):
         
         :param block: The block to notarize.
         """
+        #epoch_votes = self.votes.get(block.epoch, [])
+        #unique_vote_count = len({b.hash for b in epoch_votes})  # Count unique votes by block hash
+
         with self.lock:
-            epoch_votes = self.votes.get(block.epoch, [])
-            unique_vote_count = len({b.hash for b in epoch_votes})  # Count unique votes by block hash
-            
-            print(f"Total unique votes for epoch {block.epoch}: {unique_vote_count} (n/2 = {self.total_nodes // 2})") #debugging
-            
-            if unique_vote_count > self.total_nodes // 2:
+            if block.epoch in self.notarized_blocks and self.notarized_blocks[block.epoch].hash == block.hash:
+                print(f"Block {block.hash.hex()} has already been notarized in epoch {block.epoch}")
+                return  # Block has already been notarized
+
+            # Notarize the block if it has more than n/2 votes
+            if block.votes > self.total_nodes // 2:
                 self.notarized_blocks[block.epoch] = block
-                print(f"Block {block.hash} notarized in epoch {block.epoch}")
+                print(f"Block {block.hash.hex()} notarized in epoch {block.epoch}")
         
         self.finalize_blocks()
 
@@ -117,22 +118,8 @@ class Node(threading.Thread):
                 if notarized_epochs[i] == notarized_epochs[i-1] + 1 and notarized_epochs[i+1] == notarized_epochs[i] + 1:
                     # Finalize the second block in this sequence
                     finalized_block = self.notarized_blocks[notarized_epochs[i]]
-                    print(f"Node {self.node_id} finalizes Block {finalized_block.hash}")
+                    print(f"Node {self.node_id} finalizes Block {finalized_block.hash.hex()}")
                     self.blockchain.append(finalized_block)
-
-    def generate_random_transaction(self):
-        """
-        Generates a random transaction and adds it to the pending transaction list.
-        """
-        sender = random.randint(0, self.total_nodes - 1)
-        receiver = random.randint(0, self.total_nodes - 1)
-        amount = round(random.uniform(1, 100), 2)
-
-        if sender != receiver:
-            tx_id = self.network.get_next_tx_id()  # Fetch globally unique ID
-            tx = Transaction(sender, receiver, tx_id, amount)
-            self.pending_transactions.append(tx)
-            print(f"Node {self.node_id} generated transaction: {tx.tx_id}")
 
     def receive_message(self, message):
         """
@@ -141,15 +128,11 @@ class Node(threading.Thread):
         :param message: The message received.
         """
         if message.msg_type == MessageType.PROPOSE:
-            print(f"Node {self.node_id} received proposed Block {message.content.hash}")
+            print(f"Node {self.node_id} received proposed Block {message.content.hash.hex()}")
             self.vote_on_block(message.content)
 
-            # Send Echo message to other nodes after receiving a Propose message
-            echo_message = Message.create_echo_message(message, self.node_id)
-            self.broadcast_message(echo_message)
-
         elif message.msg_type == MessageType.VOTE:
-            print(f"Node {self.node_id} received vote for Block {message.content.hash}")
+            #print(f"Node {self.node_id} received vote for Block {message.content.hash.hex()}")
             self.notarize_block(message.content)
 
             # Send Echo message to other nodes after receiving a Vote message
@@ -176,47 +159,51 @@ class Node(threading.Thread):
         Returns the last block in the longest notarized chain.
         Traverses from the latest notarized block backwards to find the longest chain.
         """
-        # Start with the latest epoch with a notarized block
-        if not self.notarized_blocks:
-            return None  # No notarized blocks yet
+        with self.lock:  # Acquire the lock to safely access shared resources
+            if not self.notarized_blocks:
+                return None  # No notarized blocks yet
 
-        # Find the latest epoch with a notarized block
-        latest_epoch = max(self.notarized_blocks.keys())
-        longest_chain_tip = self.notarized_blocks[latest_epoch]
-        
-        # Traverse backward through the chain to form the full notarized chain
-        chain = []
-        current_block = longest_chain_tip
+            # Find the latest epoch with a notarized block
+            latest_epoch = max(self.notarized_blocks.keys())
+            longest_chain_tip = self.notarized_blocks[latest_epoch]
+
+            # Traverse backward through the chain to form the full notarized chain
+            chain = []
+            current_block = longest_chain_tip
+
         while current_block:
             chain.append(current_block)
-            # Find the parent block by matching its hash with the previous hash
-            parent_block = None
-            for block in self.notarized_blocks.values():
-                if block.hash == current_block.previous_hash:
-                    parent_block = block
-                    break
-            current_block = parent_block
-        
-        # Return the block at the tip of the longest notarized chain
-        # which is the most recent block in the longest consecutive notarized chain
-        return chain[-1] if chain else None
-    
-    def display_blockchain(self):
-        """
-        Displays the current state of the blockchain for this node.
-        """
-        if not self.blockchain:
-            print(f"Node {self.node_id}: Blockchain is empty.")
-            return
 
-        print(f"Node {self.node_id}: Current Blockchain:")
-        for index, block in enumerate(self.blockchain):
-            print(f"Block {index + 1}:")
-            print(f"  Hash: {block.hash}")
-            print(f"  Previous Hash: {block.previous_hash}")
-            print(f"  Epoch: {block.epoch}")
-            print(f"  Transactions: {len(block.transactions)} transactions")
-            for tx in block.transactions:
-                print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
-            print("-" * 40)  # Separator for each block
+            # Find the parent block by matching its hash with the previous hash (in bytes)
+            parent_block = None
+            with self.lock:  # Lock again just while accessing notarized_blocks
+                for block in self.notarized_blocks.values():
+                    if block.hash == current_block.previous_hash:
+                        parent_block = block
+                        break
+
+            current_block = parent_block
+
+        # Return the tip of the longest notarized chain (the last block added to the chain)
+        return chain[-1] if chain else None
+
+    
+    # def display_blockchain(self):
+    #     """
+    #     Displays the current state of the blockchain for this node.
+    #     """
+    #     if not self.blockchain:
+    #         print(f"Node {self.node_id}: Blockchain is empty.")
+    #         return
+    #
+    #     print(f"Node {self.node_id}: Current Blockchain:")
+    #     for index, block in enumerate(self.blockchain):
+    #         print(f"Block {index + 1}:")
+    #         print(f"  Hash: {block.hash.hex()}")
+    #         print(f"  Previous Hash: {block.previous_hash}")
+    #         print(f"  Epoch: {block.epoch}")
+    #         print(f"  Transactions: {len(block.transactions)} transactions")
+    #         for tx in block.transactions:
+    #             print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
+    #         print("-" * 40)  # Separator for each block
 

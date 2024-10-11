@@ -1,7 +1,10 @@
+import random
 import threading
 import time
 from message import Message, MessageType
 from node import Node
+from block import Block
+from transaction import Transaction
 
 class StreamletNetwork:
     def __init__(self, num_nodes, delta):
@@ -19,12 +22,23 @@ class StreamletNetwork:
         self.delta = delta  # Set ∆, the network delay parameter
         self.epoch_duration = 2 * delta  # Epoch lasts for 2∆ rounds
 
+        # Initialize the genesis block (epoch, length, and hash are all 0)
+        self.genesis_block = Block(epoch=0, previous_hash=b'0', transactions=[])
+        for node in self.nodes:
+            node.blockchain.append(self.genesis_block)  # Start all nodes with the genesis block
+            node.notarized_blocks[0] = self.genesis_block  # Genesis block is notarized from the start
+
     def start_network(self):
         """
         Starts all the nodes as separate threads.
         """
         for node in self.nodes:
             node.start()
+
+        # Start generating transactions periodically in a separate thread
+        transaction_thread = threading.Thread(target=self.generate_transactions_periodically, args=(self.delta/2,))
+        transaction_thread.daemon = True  # Daemon thread will exit when the main program exits
+        transaction_thread.start()
 
     def stop_network(self):
         """
@@ -89,4 +103,28 @@ class StreamletNetwork:
             self.global_tx_id += 1
             return self.global_tx_id
         
+    def generate_random_transaction(self):
+        """
+        Generates a random transaction with a unique transaction ID and distributes
+        it to a random node in the network.
+        """
+        sender = f"Client{random.randint(1, 100)}"
+        receiver = f"Client{random.randint(1, 100)}"
+        amount = random.randint(1, 1000)
 
+        # Get a globally unique transaction ID
+        tx_id = self.get_next_tx_id()
+        transaction = Transaction(tx_id, sender, receiver, amount)
+
+        # Distribute the transaction to a random node in the network
+        target_node = random.choice(self.nodes)
+        target_node.pending_transactions.append(transaction)
+        print(f"Transaction {tx_id} generated: {sender} -> {receiver}, Amount: {amount}, assigned to Node {target_node.node_id}")
+    
+    def generate_transactions_periodically(self, interval):
+        """
+        Generates transactions at regular intervals.
+        """
+        while True:
+            self.generate_random_transaction()
+            time.sleep(interval)

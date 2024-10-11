@@ -39,12 +39,16 @@ class Message:
         :return: A Message object.
         """
         # Create a message with the VOTE type and send the block without its transactions
-        empty_block = Block(
+        vote_block = Block(
             epoch=block.epoch,               # The epoch remains the same
             previous_hash=block.previous_hash,  # The previous hash remains the same
-            transactions=[]                  # Remove transactions for voting
+            transactions=[]    # Remove transactions for voting             
         )
-        return Message(MessageType.VOTE, empty_block, sender)
+        vote_block.votes = block.votes # Preserve the original vote count 
+        vote_block.hash = block.hash  # Preserve the original hash
+        vote_block.length = block.length  # Preserve the original block's length
+
+        return Message(MessageType.VOTE, vote_block, sender)
 
     @staticmethod
     def create_echo_message(message, sender: int):
