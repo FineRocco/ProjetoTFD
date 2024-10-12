@@ -1,4 +1,6 @@
-# transaction.py
+import random
+import time
+
 
 class Transaction:
     def __init__(self, sender: int, receiver: int, tx_id: int, amount: float):
@@ -25,5 +27,6 @@ class Transaction:
         :param amount: The amount to be transferred.
         :return: A Transaction object.
         """
-        # To Do: Implement a unique transaction ID generation logic
-        pass
+        # Create a unique transaction ID
+        unique_id = int(time.time() * 1000) + random.randint(1000, 9999)
+        return Transaction(sender, receiver, unique_id, amount)

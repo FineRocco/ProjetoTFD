@@ -1,5 +1,3 @@
-# message.py
-
 from block import Block
 
 class MessageType:
@@ -27,10 +25,9 @@ class Message:
 
         :param block: The Block to propose.
         :param sender: The sender node ID.
-        :return: A Message object.
+        :return: A Message object with 'Propose' type.
         """
-        # To Do: Implement propose message creation
-        pass
+        return Message(MessageType.PROPOSE, block, sender)
 
     @staticmethod
     def create_vote_message(block: Block, sender: int):
@@ -39,10 +36,9 @@ class Message:
 
         :param block: The Block to vote on.
         :param sender: The sender node ID.
-        :return: A Message object.
+        :return: A Message object with 'Vote' type.
         """
-        # To Do: Implement vote message creation
-        pass
+        return Message(MessageType.VOTE, block, sender)
 
     @staticmethod
     def create_echo_message(message, sender: int):
@@ -51,7 +47,9 @@ class Message:
 
         :param message: The message to echo.
         :param sender: The sender node ID.
-        :return: A Message object.
+        :return: A Message object with 'Echo' type.
         """
-        # To Do: Implement echo message creation
-        pass
+        return Message(MessageType.ECHO, message, sender)
+    
+    def __repr__(self):
+        return f"<Message(type={self.msg_type}, sender={self.sender}, content={self.content})>"

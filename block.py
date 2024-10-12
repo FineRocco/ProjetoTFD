@@ -1,7 +1,6 @@
-# block.py
-
 import hashlib
 from transaction import Transaction
+import json
 
 class Block:
     def __init__(self, hash: bytes, epoch: int, length: int, transactions: list[Transaction]):
@@ -26,8 +25,7 @@ class Block:
         :param block_data: The serialized block data to hash.
         :return: The SHA-1 hash of the block.
         """
-        # To Do: Implement hash computation logic
-        pass
+        return hashlib.sha1(block_data.encode()).digest()
 
     def serialize_block(self) -> str:
         """
@@ -35,10 +33,16 @@ class Block:
 
         :return: A string representation of the block data.
         """
-        # To Do: Implement block serialization logic
-        pass
+        block_data = {
+            'epoch': self.epoch,
+            'length': self.length,
+            'transactions': [tx.__dict__ for tx in self.transactions],
+            'previous_hash': self.hash.hex()
+        }
+        return json.dumps(block_data, sort_keys=True)
 
-    def generate_block(self, epoch: int, transactions: list[Transaction], previous_hash: bytes):
+    @classmethod
+    def generate_block(cls, epoch: int, transactions: list[Transaction], previous_hash: bytes) -> 'Block':
         """
         Generates a new block with the given transactions.
 
@@ -47,5 +51,9 @@ class Block:
         :param previous_hash: The hash of the previous block.
         :return: A Block object.
         """
-        # To Do: Implement block generation logic
-        pass
+        block_data = cls(hash=previous_hash, epoch=epoch, length=len(transactions), transactions=transactions)
+        serialized_block = block_data.serialize_block()
+        block_hash = cls.compute_hash(serialized_block)
+        block_data.hash = block_hash
+        return block_data
+
