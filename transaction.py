@@ -10,7 +10,7 @@ class Transaction:
                 f"transaction_id={self.transaction_id}, amount={self.amount})")
     
     def is_valid(self):
-        return self.amount > 0
+        return (self.receiver != self.sender) & (self.amount > 0)
 
     @property
     def sender(self):

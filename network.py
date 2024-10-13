@@ -1,4 +1,4 @@
-from node import BlockchainNetworkNode
+from node import Node
 from transaction import Transaction
 
 class Network:
@@ -6,7 +6,7 @@ class Network:
         self.nodes = []  # List of nodes in the network
 
     def add_node(self, node_id):
-        new_node = BlockchainNetworkNode(node_id)
+        new_node = Node(node_id)
         self.nodes.append(new_node)
         print(f"Node {node_id} added to the network.")
 
