@@ -1,31 +1,45 @@
-import random
-import time
-
 class Transaction:
-    def __init__(self, sender: int, receiver: int, tx_id: int, amount: float):
-        """
-        Initializes a Transaction object.
-        
-        :param sender: The sender of the transaction.
-        :param receiver: The receiver of the transaction.
-        :param tx_id: A unique transaction id.
-        :param amount: The amount to be transferred.
-        """
-        self.sender = sender
-        self.receiver = receiver
-        self.tx_id = tx_id
-        self.amount = amount
+    def __init__(self, sender, receiver, transaction_id, amount):
+        self._sender = sender           
+        self._receiver = receiver          
+        self._transaction_id = transaction_id                
+        self._amount = amount              
+    
+    def __repr__(self):
+        return (f"Transaction(sender={self.sender}, receiver={self.receiver}, "
+                f"transaction_id={self.transaction_id}, amount={self.amount})")
+    
+    def is_valid(self):
+        return self.amount > 0
 
-    @staticmethod
-    def generate_transaction(sender: int, receiver: int, amount: float):
-        """
-        Generates a new transaction with a unique transaction id.
+    @property
+    def sender(self):
+        return self._sender
 
-        :param sender: The sender of the transaction.
-        :param receiver: The receiver of the transaction.
-        :param amount: The amount to be transferred.
-        :return: A Transaction object.
-        """
-        # Create a unique transaction ID
-        unique_id = int(time.time() * 1000) + random.randint(1000, 9999)
-        return Transaction(sender, receiver, unique_id, amount)
+    @sender.setter
+    def sender(self, value):
+        self._sender = value
+
+    @property
+    def receiver(self):
+        return self._receiver
+
+    @receiver.setter
+    def receiver(self, value):
+        self._receiver = value
+
+    @property
+    def transaction_id(self):
+        return self._transaction_id
+
+    @transaction_id.setter
+    def transaction_id(self, value):
+        self._transaction_id = value
+
+    @property
+    def amount(self):
+        return self._amount
+
+    @amount.setter
+    def amount(self, value):
+        self._amount = value
