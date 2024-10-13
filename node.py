@@ -1,112 +1,173 @@
-import random
-import time
+import threading
 from block import Block
 from transaction import Transaction
 from message import Message, MessageType
 
-class Node:
+class Node(threading.Thread):
     def __init__(self, node_id: int, network):
         """
-        Initializes a Node object.
+        Initializes a Node object and starts a thread for it.
 
-        :param node_id: The ID of this node.
+        :param node_id: The unique ID of the node.
         :param network: A reference to the network (list of all nodes).
         """
+        threading.Thread.__init__(self)
         self.node_id = node_id
-        self.blockchain = []  # The local blockchain.
-        self.pending_transactions = []  # List of pending transactions.
-        self.votes = {}  # Dictionary to store votes for blocks.
-        self.notarized_blocks = set()  # Set of notarized blocks.
-        self.network = network  # Reference to all nodes in the network.
-
-    def receive_transaction(self, transaction: Transaction):
-        """
-        Receives a transaction and adds it to the pending transactions.
-
-        :param transaction: The transaction received.
-        """
-        self.pending_transactions.append(transaction)
-        print(f"Node {self.node_id} received transaction: {transaction}")
+        self.blockchain = []  # Local chain of notarized blocks
+        self.pending_transactions = []  # List of pending transactions
+        self.votes = {}  # Keeps track of votes for each block by epoch
+        self.notarized_blocks = {}  # Blocks that received n/2 votes
+        self.network = network  # Reference to all nodes in the network
+        self.lock = threading.Lock()  # Lock for thread-safe operations
 
     def propose_block(self, epoch: int):
         """
-        Proposes a new block with pending transactions if this node is the leader.
+        Proposes a new block at the start of an epoch.
 
-        :param epoch: The current epoch.
-        :return: A Message object containing the proposed Block.
+        :param epoch: The current epoch number.
         """
         if self.node_id != self.get_leader(epoch):
-            return None  # Not the leader, cannot propose a block.
-
-        if not self.pending_transactions:
-            print(f"Node {self.node_id} has no transactions to propose.")
+            print(f"Node {self.node_id} is not the leader for epoch {epoch}, cannot propose a block.")
             return None
+        
+        previous_block = self.get_longest_notarized_chain()
+        previous_hash = previous_block.hash if previous_block else b'0' * 20
 
-        # Create a new block with the pending transactions
-        previous_hash = self.blockchain[-1].hash if self.blockchain else b'0'  # Genesis block if none exists
-        new_block = Block.generate_block(
-            epoch=epoch,
-            transactions=self.pending_transactions,
-            previous_hash=previous_hash
-        )
+        with self.lock:
+            new_block = Block.generate_block(
+                epoch=epoch,
+                transactions=self.pending_transactions,
+                previous_hash=previous_hash
+            )
+            self.pending_transactions.clear()  # Clear after proposing
 
-        # Clear pending transactions after proposing the block
-        self.pending_transactions.clear()
-
-        # Create a propose message and broadcast to all nodes
+        print(f"Node {self.node_id} proposes Block: {new_block.hash.hex()}")
+        
+        # Create and broadcast a Propose message
         propose_message = Message.create_propose_message(new_block, self.node_id)
-        self.broadcast(propose_message)
+        self.broadcast_message(propose_message)
 
-        print(f"Node {self.node_id} proposed block at epoch {epoch}.")
-        return propose_message
+        return new_block
 
     def vote_on_block(self, block: Block):
         """
-        Votes on a proposed block if it is valid and notarizes it if it gets enough votes.
+        Votes on a proposed block if it extends the longest notarized chain.
 
-        :param block: The block to vote on.
+        :param block: The proposed block.
         """
-        # Create a vote message for the given block
-        vote_message = Message.create_vote_message(block, self.node_id)
-        self.broadcast(vote_message)
-
-        block_hash = block.hash
-        if block_hash not in self.votes:
-            self.votes[block_hash] = set()
-
-        self.votes[block_hash].add(self.node_id)
-
-        # Check if the block has enough votes to be notarized (2/3 majority)
-        if len(self.votes[block_hash]) > (2 / 3) * len(self.network):
-            print(f"Node {self.node_id} has notarized block {block_hash}.")
-            self.notarized_blocks.add(block_hash)
-            self.blockchain.append(block)
-            self.check_for_finalization(block)
-            
-    def check_for_finalization(self, block):
-        """
-        Checks if three consecutive blocks are notarized and finalizes them.
-        This is a simple finalization rule where if the last three blocks are notarized, the middle one is finalized.
+        longest_notarized_block = self.get_longest_notarized_chain()
+        if longest_notarized_block and block.length <= longest_notarized_block.length:
+            print(f"Node {self.node_id} does not vote for Block {block.hash.hex()} (not extending the chain).")
+            return  # Do not vote for shorter or equal-length chains
         
-        :param block: The last notarized block.
-        """
-        index = len(self.blockchain) - 1
-        if index >= 2:
-            if (self.blockchain[index - 2].hash in self.notarized_blocks and
-                self.blockchain[index - 1].hash in self.notarized_blocks and
-                self.blockchain[index].hash in self.notarized_blocks):
-                print(f"Node {self.node_id} finalized block {self.blockchain[index - 1].hash}.")
+        with self.lock:
+            if block.epoch not in self.votes:
+                self.votes[block.epoch] = []
 
+            # Check if this node has already voted for this block in this epoch
+            if any(voted_block.hash == block.hash for voted_block in self.votes[block.epoch]):
+                print(f"Node {self.node_id} has already voted for Block {block.hash.hex()} in epoch {block.epoch}")
+                return  # Node has already voted for this block in this epoch
 
-    def broadcast(self, message: Message):
+            # Add the block to the list of voted blocks for this epoch
+            self.votes[block.epoch].append(block)
+            block.votes += 1  # Increment the block's vote count
+            print(f"Node {self.node_id} voted for Block {block.hash.hex()} in epoch {block.epoch}")
+
+        # Broadcast vote to all other nodes
+        vote_message = Message.create_vote_message(block, self.node_id)
+        self.broadcast_message(vote_message)
+        
+    def notarize_block(self, block: Block):
         """
-        Broadcasts a message to all other nodes in the network.
+        Notarizes a block if it receives more than n/2 votes.
+
+        :param block: The block to notarize.
+        """
+        with self.lock:
+            if block.epoch in self.notarized_blocks and self.notarized_blocks[block.epoch].hash == block.hash:
+                print(f"Block {block.hash.hex()} has already been notarized in epoch {block.epoch}")
+                return  # Block has already been notarized
+
+            # Notarize the block if it has more than n/2 votes
+            if block.votes > len(self.network) // 2:
+                self.notarized_blocks[block.epoch] = block
+                print(f"Block {block.hash.hex()} notarized in epoch {block.epoch}")
+
+        self.finalize_blocks()
+
+    def finalize_blocks(self):
+        """
+        Finalizes blocks when three consecutive blocks are notarized.
+        """
+        with self.lock:
+            notarized_epochs = sorted(self.notarized_blocks.keys())
+            for i in range(1, len(notarized_epochs) - 1):
+                if (notarized_epochs[i] == notarized_epochs[i-1] + 1 and
+                        notarized_epochs[i+1] == notarized_epochs[i] + 1):
+                    finalized_block = self.notarized_blocks[notarized_epochs[i]]
+                    print(f"Node {self.node_id} finalizes Block {finalized_block.hash.hex()}")
+                    self.blockchain.append(finalized_block)
+
+    def receive_message(self, message: Message):
+        """
+        Handles incoming messages (Propose, Vote, or Echo).
+
+        :param message: The message to handle.
+        """
+        if message.msg_type == MessageType.PROPOSE:
+            print(f"Node {self.node_id} received proposed Block {message.content.hash.hex()}")
+            self.vote_on_block(message.content)
+
+        elif message.msg_type == MessageType.VOTE:
+            self.notarize_block(message.content)
+
+            # Send Echo message to other nodes after receiving a Vote message
+            echo_message = Message.create_echo_message(message, self.node_id)
+            self.broadcast_message(echo_message)
+
+    def broadcast_message(self, message: Message):
+        """
+        Sends a message to all other nodes in the network.
 
         :param message: The message to broadcast.
         """
         for node in self.network:
             if node.node_id != self.node_id:
-                node.handle_message(message)
+                node.receive_message(message)
+
+    def get_longest_notarized_chain(self) -> Block:
+        """
+        Returns the last block in the longest notarized chain.
+        Traverses from the latest notarized block backwards to find the longest chain.
+
+        :return: The last block of the longest notarized chain or None.
+        """
+        with self.lock:
+            if not self.notarized_blocks:
+                return None  # No notarized blocks yet
+
+            # Find the latest epoch with a notarized block
+            latest_epoch = max(self.notarized_blocks.keys())
+            longest_chain_tip = self.notarized_blocks[latest_epoch]
+
+            # Traverse backward through the chain to find the longest chain
+            chain = []
+            current_block = longest_chain_tip
+            while current_block:
+                chain.append(current_block)
+
+                # Find the parent block
+                parent_block = None
+                with self.lock:
+                    for block in self.notarized_blocks.values():
+                        if block.hash == current_block.previous_hash:
+                            parent_block = block
+                            break
+
+                current_block = parent_block
+
+            return chain[-1] if chain else None
 
     def get_leader(self, epoch: int) -> int:
         """
@@ -116,37 +177,3 @@ class Node:
         :return: The ID of the leader node.
         """
         return epoch % len(self.network)
-
-    def handle_message(self, message: Message):
-        """
-        Handles an incoming message (Propose, Vote, or Echo).
-
-        :param message: The message to handle.
-        """
-        if message.msg_type == MessageType.PROPOSE:
-            block = message.content
-            print(f"Node {self.node_id} received a block proposal for block {block.hash}.")
-            self.vote_on_block(block)
-
-        elif message.msg_type == MessageType.VOTE:
-            block = message.content
-            block_hash = block.hash
-            if block_hash not in self.votes:
-                self.votes[block_hash] = set()
-            self.votes[block_hash].add(message.sender)
-
-            if len(self.votes[block_hash]) > (2 / 3) * len(self.network):
-                print(f"Node {self.node_id} notarized block {block_hash}.")
-                self.notarized_blocks.add(block_hash)
-                self.blockchain.append(block)
-                self.check_for_finalization(block)
-
-        elif message.msg_type == MessageType.ECHO:
-            print(f"Node {self.node_id} received an Echo message.")
-            
-    def finalize_blockchain(self):
-        """
-        Check the blockchain for finalized blocks.
-        In this simple model, we finalize blocks as they are notarized.
-        """
-        print(f"Node {self.node_id} finalized blockchain with {len(self.blockchain)} blocks.")

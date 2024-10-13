@@ -15,7 +15,7 @@ class Message:
         :param sender: The ID of the sender node.
         """
         self.msg_type = msg_type
-        self.content = content
+        self.content = content  # This can either be a Block or a Message
         self.sender = sender
 
     @staticmethod
@@ -25,7 +25,7 @@ class Message:
 
         :param block: The Block to propose.
         :param sender: The sender node ID.
-        :return: A Message object with 'Propose' type.
+        :return: A Message object.
         """
         return Message(MessageType.PROPOSE, block, sender)
 
@@ -36,9 +36,19 @@ class Message:
 
         :param block: The Block to vote on.
         :param sender: The sender node ID.
-        :return: A Message object with 'Vote' type.
+        :return: A Message object.
         """
-        return Message(MessageType.VOTE, block, sender)
+        # Create a vote block without transactions to minimize size
+        vote_block = Block(
+            epoch=block.epoch,
+            previous_hash=block.previous_hash,
+            transactions=[]  # Strip transactions for vote
+        )
+        vote_block.votes = block.votes  
+        vote_block.hash = block.hash    
+        vote_block.length = block.length  
+
+        return Message(MessageType.VOTE, vote_block, sender)
 
     @staticmethod
     def create_echo_message(message, sender: int):
@@ -47,9 +57,9 @@ class Message:
 
         :param message: The message to echo.
         :param sender: The sender node ID.
-        :return: A Message object with 'Echo' type.
+        :return: A Message object.
         """
         return Message(MessageType.ECHO, message, sender)
-    
+
     def __repr__(self):
         return f"<Message(type={self.msg_type}, sender={self.sender}, content={self.content})>"
