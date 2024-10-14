@@ -14,7 +14,6 @@ class Node:
         self.votes = {}          # Dictionary to track votes for blocks
         self.leader = False      # Indicates if the node is the leader for the current epoch
         self.peers = []          # List of peers connected to this node
-        self.status = "active"   # Current status of the node
 
         # Initialize the blockchain with a genesis block
         genesis_block = Block(previous_hash='0', epoch=self.current_epoch, length=1, transactions=[])
@@ -27,13 +26,7 @@ class Node:
     def __repr__(self):
         return (f"Node(node_id={self.node_id}, current_epoch={self.current_epoch}, "
                 f"blockchain_length={len(self.blockchain.chain)}, status={self.status})")
-
-    def process_messages(self):
-        """Continuously process incoming messages in a separate thread."""
-        while self.status == "active":
-            # Simulate checking for new messages (could be replaced with an actual queue)
-            pass  # Implement message retrieval and processing logic
-
+        
     def process_message(self, message):
         """Process received messages by delegating to the message handler."""
         message.handle(self)

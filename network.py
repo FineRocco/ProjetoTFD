@@ -3,7 +3,7 @@ from transaction import Transaction
 
 class Network:
     def __init__(self):
-        self.nodes = []  # List of nodes in the network
+        self.nodes : Node = []  # List of nodes in the network
 
     def add_node(self, node_id):
         new_node = Node(node_id)
