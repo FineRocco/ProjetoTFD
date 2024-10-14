@@ -1,3 +1,4 @@
+import hashlib
 import threading
 from blockchain import Blockchain, Block
 from message import Message
@@ -67,12 +68,22 @@ class Node:
         """Finalize the block if all conditions are met."""
         self.blockchain.finalize()
         print(f"Node {self.node_id} finalized blockchain in epoch {self.current_epoch}.")
+    
+    def get_current_epoch(self):
+        """Returns the current epoch for the node."""
+        return self.current_epoch
 
-    def update_current_leader(self):
-        """Determine if the node is the leader for the current epoch."""
-        self.leader = (self.node_id == self.current_epoch % len(self.peers) + 1)
-        if self.leader:
-            print(f"Node {self.node_id} is the leader for epoch {self.current_epoch}.")
+    def update_current_leader(self, nodes_count):
+        """
+        Node finds the epoch leader using a hash-based method.
+        Leader calculation is based on the number of nodes in the network.
+        """
+        epoch = self.get_current_epoch()
+        hasher = hashlib.sha256()  # Using sha256 hash function
+        hasher.update(str(epoch).encode('utf-8'))  # Hash the epoch as a string
+        epoch_hash = int(hasher.hexdigest(), 16)  # Convert the hash to an integer
+
+        return epoch_hash % nodes_count  # Leader is determined by modulus
 
     def broadcast(self, message):
         """Broadcast messages to peers."""

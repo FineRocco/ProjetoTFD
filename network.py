@@ -1,12 +1,15 @@
+from lib2to3.pytree import Node
+
+
 class Network:
-    def __init__(self, nodes):
-        self.nodes = nodes
+    def __init__(self):
+        self.nodes : Node = []
 
     def start_epoch(self):
         """Start a new epoch and let the leader propose blocks."""
         for node in self.nodes:
             node.current_epoch += 1
-            node.update_current_leader()
+            node.update_current_leader(self.nodes.length)
             if node.leader:
                 node.propose_block()
                 node.finalize()
