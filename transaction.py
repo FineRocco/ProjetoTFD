@@ -14,6 +14,9 @@ class Transaction:
         self.receiver = receiver
         self.tx_id = tx_id
         self.amount = amount
+        
+    def __repr__(self):
+        return f"Transaction({self.sender} -> {self.receiver}, id: {self.tx_id}, amount: {self.amount})"
 
     @staticmethod
     def generate_transaction(sender: int, receiver: int, amount: float):
