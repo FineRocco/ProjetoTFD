@@ -1,3 +1,4 @@
+import pickle
 from block import Block
 
 class MessageType:
@@ -40,13 +41,13 @@ class Message:
         """
         # Create a message with the VOTE type and send the block without its transactions
         vote_block = Block(
-            epoch=block.epoch,               # The epoch remains the same
-            previous_hash=block.previous_hash,  # The previous hash remains the same
-            transactions=[]    # Remove transactions for voting             
+            epoch=block.epoch,
+            previous_hash=block.previous_hash,
+            transactions=[]
         )
-        vote_block.votes = block.votes # Preserve the original vote count 
-        vote_block.hash = block.hash  # Preserve the original hash
-        vote_block.length = block.length  # Preserve the original block's length
+        vote_block.votes = block.votes
+        vote_block.hash = block.hash
+        vote_block.length = block.length
 
         return Message(MessageType.VOTE, vote_block, sender)
 
@@ -59,5 +60,22 @@ class Message:
         :param sender: The sender node ID.
         :return: A Message object.
         """
-        # Echoing an existing message
         return Message(MessageType.ECHO, message, sender)
+
+    def serialize(self):
+        """
+        Serializes the message into bytes for transmission.
+        
+        :return: The serialized message in bytes.
+        """
+        return pickle.dumps(self)
+
+    @staticmethod
+    def deserialize(data):
+        """
+        Deserializes bytes back into a Message object.
+        
+        :param data: The byte data to deserialize.
+        :return: A Message object.
+        """
+        return pickle.loads(data)

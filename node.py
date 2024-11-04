@@ -1,4 +1,5 @@
 import threading
+import socket
 import time
 import random
 
@@ -7,7 +8,7 @@ from message import Message, MessageType
 from transaction import Transaction
 
 class Node(threading.Thread):
-    def __init__(self, node_id, total_nodes, network):
+    def __init__(self, node_id, total_nodes, network, port):
         """
         Initializes a Node object and starts a thread for it.
 
@@ -23,8 +24,31 @@ class Node(threading.Thread):
         self.votes = {}  # Keeps track of votes for each block by epoch
         self.notarized_blocks = {}  # Blocks that received n/2 votes
         self.network = network
+        self.port = port
         self.running = True
         self.lock = threading.Lock()
+
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock.bind(('localhost', self.port))
+        self.sock.listen()
+
+    def run(self):
+        # Accept incoming connections and start a listener thread for each connection
+        while self.running:
+            conn, addr = self.sock.accept()
+            threading.Thread(target=self.handle_connection, args=(conn,)).start()
+
+    def handle_connection(self, conn):
+        # Handle incoming messages from other nodes
+        while self.running:
+            try:
+                data = conn.recv(4096)
+                if data:
+                    message = Message.deserialize(data)  # Assuming Message class has deserialize method
+                    self.receive_message(message)
+            except ConnectionResetError:
+                break
 
     def propose_block(self, epoch):
         """
@@ -32,16 +56,15 @@ class Node(threading.Thread):
         :param epoch: The current epoch number.
         """
         if self.node_id != self.network.leader:
-            print(f"Node {self.node_id} is not the leader for epoch {epoch}, cannot propose a block.")
+            print(f"Node {self.node_id} is not the leader for epoch {epoch}.")
             return None
         
-        # Select the longest notarized chain
         previous_block = self.get_longest_notarized_chain()
         previous_hash = previous_block.hash if previous_block else b'0' * 20
 
         with self.lock:
             new_block = Block(epoch, previous_hash, self.pending_transactions)
-            self.pending_transactions = []  # Clear after proposing
+            self.pending_transactions = []
 
         print(f"Node {self.node_id} proposes Block: {new_block.hash.hex()}")
         
@@ -144,14 +167,15 @@ class Node(threading.Thread):
             # Echo handling logic can be added here if needed
 
     def broadcast_message(self, message):
-        """
-        Sends a message to all other nodes in the network.
-        
-        :param message: The message to broadcast.
-        """
+        serialized_message = message.serialize()  # Assuming Message class has serialize method
         for node in self.network.nodes:
             if node.node_id != self.node_id:
-                node.receive_message(message)
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.connect(('localhost', node.port))
+                        s.sendall(serialized_message)
+                except ConnectionRefusedError:
+                    print(f"Node {self.node_id} could not connect to Node {node.node_id}")
 
 
     def get_longest_notarized_chain(self):
@@ -186,24 +210,23 @@ class Node(threading.Thread):
 
         # Return the tip of the longest notarized chain (the last block added to the chain)
         return chain[-1] if chain else None
-
     
-    # def display_blockchain(self):
-    #     """
-    #     Displays the current state of the blockchain for this node.
-    #     """
-    #     if not self.blockchain:
-    #         print(f"Node {self.node_id}: Blockchain is empty.")
-    #         return
-    #
-    #     print(f"Node {self.node_id}: Current Blockchain:")
-    #     for index, block in enumerate(self.blockchain):
-    #         print(f"Block {index + 1}:")
-    #         print(f"  Hash: {block.hash.hex()}")
-    #         print(f"  Previous Hash: {block.previous_hash}")
-    #         print(f"  Epoch: {block.epoch}")
-    #         print(f"  Transactions: {len(block.transactions)} transactions")
-    #         for tx in block.transactions:
-    #             print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
-    #         print("-" * 40)  # Separator for each block
+    def display_blockchain(self):
+        """
+        Displays the current state of the blockchain for this node.
+        """
+        if not self.blockchain:
+            print(f"Node {self.node_id}: Blockchain is empty.")
+            return
+    
+        print(f"Node {self.node_id}: Current Blockchain:")
+        for index, block in enumerate(self.blockchain):
+            print(f"Block {index + 1}:")
+            print(f"  Hash: {block.hash.hex()}")
+            print(f"  Previous Hash: {block.previous_hash}")
+            print(f"  Epoch: {block.epoch}")
+            print(f"  Transactions: {len(block.transactions)} transactions")
+            for tx in block.transactions:
+                print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
+            print("-" * 40)  # Separator for each block
 

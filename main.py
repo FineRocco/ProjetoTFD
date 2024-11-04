@@ -2,14 +2,14 @@ from streamletnetwork import StreamletNetwork
 
 def main():
     # Initialize the network with 5 nodes
-    num_nodes = 5
+    num_nodes = 3
     total_epochs = 6
     delta = 5
 
     print(f"Starting Streamlet Protocol with {num_nodes} nodes and {total_epochs} epochs.")
 
     # Create a new Streamlet Network 
-    network = StreamletNetwork(num_nodes,delta)
+    network = StreamletNetwork(num_nodes,delta, 5001)
     
     # Start the nodes in the network
     network.start_network()

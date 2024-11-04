@@ -1,13 +1,15 @@
 import random
+import socket
 import threading
 import time
 from message import Message, MessageType
 from node import Node
 from block import Block
 from transaction import Transaction
+import subprocess
 
 class StreamletNetwork:
-    def __init__(self, num_nodes, delta):
+    def __init__(self, num_nodes, delta, base_port):
         """
         Initializes a network with multiple nodes.
         
@@ -15,12 +17,17 @@ class StreamletNetwork:
         :param delta: The network delay parameter (∆), which will determine epoch duration.
         """
         self.num_nodes = num_nodes
-        self.nodes = [Node(node_id=i, total_nodes=num_nodes, network=self) for i in range(num_nodes)]
         self.leader = 0  # Initially, node 0 is the leader
         self.global_tx_id = 0  # Global transaction counter
         self.tx_id_lock = threading.Lock()  # Lock to synchronize transaction ID generation
         self.delta = delta  # Set ∆, the network delay parameter
         self.epoch_duration = 2 * delta  # Epoch lasts for 2∆ rounds
+        self.processes = []  # To store Popen process references
+        # Node ports
+        
+        self.ports = [base_port + i for i in range(num_nodes)]
+        print("port", self.ports)
+        self.nodes = []  # To store Popen process references
 
         # Initialize the genesis block (epoch, length, and hash are all 0)
         self.genesis_block = Block(epoch=0, previous_hash=b'0', transactions=[])
@@ -29,16 +36,34 @@ class StreamletNetwork:
             node.notarized_blocks[0] = self.genesis_block  # Genesis block is notarized from the start
 
     def start_network(self):
-        """
-        Starts all the nodes as separate threads.
-        """
-        for node in self.nodes:
-            node.start()
+        ready_port = 6000  # Port for readiness signaling
+        ready_count = 0
 
-        # Start generating transactions periodically in a separate thread
-        transaction_thread = threading.Thread(target=self.generate_transactions_periodically, args=(self.delta/2,))
-        transaction_thread.daemon = True  # Daemon thread will exit when the main program exits
-        transaction_thread.start()
+        # Start each node process in a new terminal
+        for i in range(self.num_nodes):
+            node_port = self.ports[i]
+            process = subprocess.Popen(
+                ["python", "node_script.py", str(i), str(self.num_nodes), str(node_port)],
+                creationflags=subprocess.CREATE_NEW_CONSOLE
+            )
+            self.processes.append(process)
+
+        # Listen for readiness signals
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ready_socket:
+            ready_socket.bind(('localhost', ready_port))
+            ready_socket.listen(self.num_nodes)
+            print("Waiting for nodes to be ready...")
+
+            while ready_count < self.num_nodes:
+                conn, _ = ready_socket.accept()
+                with conn:
+                    data = conn.recv(1024)
+                    if data == b"READY":
+                        ready_count += 1
+                        print(f"Node {ready_count} is ready")
+
+        print("All nodes are ready!")
+
 
     def stop_network(self):
         """
@@ -60,38 +85,32 @@ class StreamletNetwork:
         
         :param epoch: The current epoch number.
         """
-        leader_node = self.nodes[self.leader]
-        proposed_block = leader_node.propose_block(epoch)
-        message = Message(MessageType.PROPOSE, proposed_block, leader_node.node_id)
+        leader_port = self.ports[self.leader]
+        print(f"Epoch {epoch}: Sending PROPOSE command to leader node {self.leader}")
 
-        # Broadcast the proposed block to all other nodes
-        for node in self.nodes:
-            if node.node_id != leader_node.node_id:
-                node.receive_message(message)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect(('localhost', leader_port))
+            sock.sendall(b"PROPOSE")
 
     def run(self, total_epochs):
-        """
-        Runs the consensus protocol for a number of epochs.
-        
-        :param total_epochs: The number of epochs to run.
-        """
         for epoch in range(1, total_epochs + 1):
             print(f"=== Epoch {epoch} ===")
             self.start_epoch(epoch)
-            # Rotate leader
             self.next_leader()
 
-            # Finalize blocks at each node
-            for node in self.nodes:
-                node.finalize_blocks()
+            for port in self.ports:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        sock.connect(('localhost', port))
+                        sock.sendall(b"FINALIZE")
+                except ConnectionRefusedError:
+                    print(f"Error: Could not connect to node on port {port} to send FINALIZE command.")
+                except Exception as e:
+                    print(f"Unexpected error when sending FINALIZE command: {e}")
 
-            # Wait for the epoch duration (2∆) before starting the next epoch
             time.sleep(self.epoch_duration)
         
-        # After all epochs have completed, print the final blockchain for each node
         print("\n=== Final Blockchain for each node ===")
-        for node in self.nodes:
-            node.display_blockchain()
 
     def get_next_tx_id(self):
         """
