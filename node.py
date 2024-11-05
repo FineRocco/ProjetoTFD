@@ -8,7 +8,7 @@ from message import Message, MessageType
 from transaction import Transaction
 
 class Node(threading.Thread):
-    def __init__(self, node_id, total_nodes, network, port):
+    def __init__(self, node_id, total_nodes, network, port, ports):
         """
         Initializes a Node object and starts a thread for it.
 
@@ -25,35 +25,21 @@ class Node(threading.Thread):
         self.notarized_blocks = {}  # Blocks that received n/2 votes
         self.network = network
         self.port = port
+        self.ports = ports  # List of all valid node ports
+        print(f"Initialized Node {self.node_id} on port {self.port}")  # Debug print
         self.running = True
         self.lock = threading.Lock()
 
-    def run(self):
-        # Accept incoming connections and start a listener thread for each connection
-        while self.running:
-            conn, addr = self.sock.accept()
-            threading.Thread(target=self.handle_connection, args=(conn,)).start()
-
-    def handle_connection(self, conn):
-        # Handle incoming messages from other nodes
-        while self.running:
-            try:
-                data = conn.recv(4096)
-                if data:
-                    message = Message.deserialize(data)  # Assuming Message class has deserialize method
-                    self.receive_message(message)
-            except ConnectionResetError:
-                break
-
-    def propose_block(self, epoch):
+    def propose_block(self, epoch, leader_id):
         """
         Proposes a new block at the start of an epoch.
         :param epoch: The current epoch number.
+        :param leader_id: The ID of the current leader node.
         """
-        if self.node_id != self.network.leader:
+        if self.node_id != leader_id:
             print(f"Node {self.node_id} is not the leader for epoch {epoch}.")
             return None
-        
+
         previous_block = self.get_longest_notarized_chain()
         previous_hash = previous_block.hash if previous_block else b'0' * 20
 
@@ -118,18 +104,20 @@ class Node(threading.Thread):
                 return  # Block has already been notarized
 
             # Notarize the block if it has more than n/2 votes
+            print("Block votes: ", block.votes, "for block: ", block.hash.hex())
             if block.votes > self.total_nodes // 2:
                 self.notarized_blocks[block.epoch] = block
                 print(f"Block {block.hash.hex()} notarized in epoch {block.epoch}")
-        
-        self.finalize_blocks()
+                self.finalize_blocks()
 
+    
 
     def finalize_blocks(self):
         """
         Finalizes blocks when three consecutive blocks are notarized.
         """
         with self.lock:
+            print ("Checks for finalization")
             # Finalize logic: three consecutive notarized blocks
             notarized_epochs = sorted(self.notarized_blocks.keys())
             for i in range(1, len(notarized_epochs) - 1):
@@ -140,16 +128,16 @@ class Node(threading.Thread):
                     self.blockchain.append(finalized_block)
 
     def broadcast_message(self, message):
-        serialized_message = message.serialize()  # Assuming Message class has serialize method
-        for node in self.network.nodes:
-            if node.node_id != self.node_id:
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                        print("Socket connection node class" + node.port)
-                        s.connect(('localhost', node.port))
-                        s.sendall(serialized_message)
-                except ConnectionRefusedError:
-                    print(f"Node {self.node_id} could not connect to Node {node.node_id}")
+            serialized_message = message.serialize()
+            for target_port in self.ports:
+                if target_port != self.port:  # Skip broadcasting to the node's own port
+                    try:
+                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                            print(f"Node {self.node_id} broadcasting to port {target_port}")
+                            s.connect(('localhost', target_port))
+                            s.sendall(serialized_message)
+                    except ConnectionRefusedError:
+                        print(f"Node {self.node_id} could not connect to Node at port {target_port}")
 
 
     def get_longest_notarized_chain(self):

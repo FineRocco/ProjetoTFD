@@ -29,6 +29,9 @@ class StreamletNetwork:
         self.ports = [base_port + i for i in range(num_nodes)]
         print("port", self.ports)
 
+        self.transaction_thread = None  # To store the transaction generation thread
+        self.generate_transactions = True  # Flag to control transaction generation
+
         # Initialize the genesis block (epoch, length, and hash are all 0)
         self.genesis_block = Block(epoch=0, previous_hash=b'0', transactions=[])
         for node in self.processes:
@@ -42,8 +45,10 @@ class StreamletNetwork:
         # Start each node process in a new terminal
         for i in range(self.num_nodes):
             node_port = self.ports[i]
+            # Convert the list of ports to a comma-separated string to pass via command line
+            port_list = ",".join(map(str, self.ports))
             process = subprocess.Popen(
-                ["python", "node_script.py", str(i), str(self.num_nodes), str(node_port)],
+                ["python", "node_script.py", str(i), str(self.num_nodes), str(node_port), port_list],
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
             self.processes.append(process)
@@ -64,11 +69,22 @@ class StreamletNetwork:
 
         print("All nodes are ready!")
 
+        # Start the transaction generation thread
+        self.transaction_thread = threading.Thread(target=self.generate_transactions_periodically, args=(5,))
+        self.transaction_thread.daemon = True  # Daemon thread will close when the main program exits
+        self.transaction_thread.start()
+        print("Transaction generation thread started.")
+
 
     def stop_network(self):
         """
-        Stops all nodes from running.
+        Stops all nodes from running and stops transaction generation.
         """
+        # Stop transaction generation
+        self.generate_transactions = False
+        if self.transaction_thread:
+            self.transaction_thread.join()  # Wait for the transaction thread to finish
+
         for node in self.processes:
             node.running = False
             node.join()  # Wait for the thread to finish
@@ -94,25 +110,11 @@ class StreamletNetwork:
             strat_propose_message = Message.create_start_proposal_message(epoch, self.leader)
             sock.connect(('localhost', self.leader_port))
             sock.sendall(strat_propose_message.serialize())
-            sock.close()
 
     def run(self, total_epochs):
         for epoch in range(1, total_epochs + 1):
             print(f"=== Epoch {epoch} ===")
             self.start_epoch(epoch)
-
-            for port in self.ports:
-                print(f"Port {port}")
-                try:
-                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                        print("Connecting socket ", port)
-                        sock.connect(('localhost', port))
-                        print("Connected ", port)
-                        sock.sendall(b"FINALIZE")
-                except ConnectionRefusedError:
-                    print(f"Error: Could not connect to node on port {port} to send FINALIZE command.")
-                except Exception as e:
-                    print(f"Unexpected error when sending FINALIZE command: {e}")
 
             time.sleep(self.epoch_duration)
         
@@ -129,27 +131,36 @@ class StreamletNetwork:
             return self.global_tx_id
         
     def generate_random_transaction(self):
-        """
-        Generates a random transaction with a unique transaction ID and distributes
-        it to a random node in the network.
-        """
         sender = f"Client{random.randint(1, 100)}"
         receiver = f"Client{random.randint(1, 100)}"
         amount = random.randint(1, 1000)
 
-        # Get a globally unique transaction ID
+        # Generate a unique transaction ID
         tx_id = self.get_next_tx_id()
-        transaction = Transaction(tx_id, sender, receiver, amount)
+        transaction = {
+            'tx_id': tx_id,
+            'sender': sender,
+            'receiver': receiver,
+            'amount': amount
+        }
 
-        # Distribute the transaction to a random node in the network
-        target_node = random.choice(self.processes)
-        target_node.pending_transactions.append(transaction)
-        print(f"Transaction {tx_id} generated: {sender} -> {receiver}, Amount: {amount}, assigned to Node {target_node.node_id}")
+        # Choose a random node's port
+        target_port = random.choice(self.ports)
+
+        # Send the transaction to the target node via a socket
+        transaction_message = Message.create_transaction_message(transaction, 0)
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(('localhost', target_port))
+                s.sendall(transaction_message.serialize())
+            print(f"Sent transaction {tx_id} from {sender} to {receiver} for {amount} coins to Node at port {target_port}.")
+        except ConnectionRefusedError:
+            print(f"Failed to send transaction to Node at port {target_port}.")
     
     def generate_transactions_periodically(self, interval):
         """
         Generates transactions at regular intervals.
         """
-        while True:
+        while self.generate_transactions:
             self.generate_random_transaction()
             time.sleep(interval)
