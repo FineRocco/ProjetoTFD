@@ -18,6 +18,7 @@ class StreamletNetwork:
         """
         self.num_nodes = num_nodes
         self.leader = 0  # Initially, node 0 is the leader
+        self.leader_port = 0
         self.global_tx_id = 0  # Global transaction counter
         self.tx_id_lock = threading.Lock()  # Lock to synchronize transaction ID generation
         self.delta = delta  # Set ∆, the network delay parameter
@@ -27,11 +28,10 @@ class StreamletNetwork:
         
         self.ports = [base_port + i for i in range(num_nodes)]
         print("port", self.ports)
-        self.nodes = []  # To store Popen process references
 
         # Initialize the genesis block (epoch, length, and hash are all 0)
         self.genesis_block = Block(epoch=0, previous_hash=b'0', transactions=[])
-        for node in self.nodes:
+        for node in self.processes:
             node.blockchain.append(self.genesis_block)  # Start all nodes with the genesis block
             node.notarized_blocks[0] = self.genesis_block  # Genesis block is notarized from the start
 
@@ -69,7 +69,7 @@ class StreamletNetwork:
         """
         Stops all nodes from running.
         """
-        for node in self.nodes:
+        for node in self.processes:
             node.running = False
             node.join()  # Wait for the thread to finish
 
@@ -77,7 +77,8 @@ class StreamletNetwork:
         """
         Rotates the leader for the next epoch.
         """
-        self.leader = (self.leader + 1) % len(self.nodes)
+        self.leader = (self.leader + 1) % self.num_nodes
+        print("leader", self.leader)
 
     def start_epoch(self, epoch):
         """
@@ -85,23 +86,28 @@ class StreamletNetwork:
         
         :param epoch: The current epoch number.
         """
-        leader_port = self.ports[self.leader]
+        self.next_leader()
+        self.leader_port = self.ports[self.leader]
         print(f"Epoch {epoch}: Sending PROPOSE command to leader node {self.leader}")
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect(('localhost', leader_port))
-            sock.sendall(b"PROPOSE")
+            strat_propose_message = Message.create_start_proposal_message(epoch, self.leader)
+            sock.connect(('localhost', self.leader_port))
+            sock.sendall(strat_propose_message.serialize())
+            sock.close()
 
     def run(self, total_epochs):
         for epoch in range(1, total_epochs + 1):
             print(f"=== Epoch {epoch} ===")
             self.start_epoch(epoch)
-            self.next_leader()
 
             for port in self.ports:
+                print(f"Port {port}")
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                        print("Connecting socket ", port)
                         sock.connect(('localhost', port))
+                        print("Connected ", port)
                         sock.sendall(b"FINALIZE")
                 except ConnectionRefusedError:
                     print(f"Error: Could not connect to node on port {port} to send FINALIZE command.")
@@ -136,7 +142,7 @@ class StreamletNetwork:
         transaction = Transaction(tx_id, sender, receiver, amount)
 
         # Distribute the transaction to a random node in the network
-        target_node = random.choice(self.nodes)
+        target_node = random.choice(self.processes)
         target_node.pending_transactions.append(transaction)
         print(f"Transaction {tx_id} generated: {sender} -> {receiver}, Amount: {amount}, assigned to Node {target_node.node_id}")
     

@@ -28,11 +28,6 @@ class Node(threading.Thread):
         self.running = True
         self.lock = threading.Lock()
 
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind(('localhost', self.port))
-        self.sock.listen()
-
     def run(self):
         # Accept incoming connections and start a listener thread for each connection
         while self.running:
@@ -144,34 +139,13 @@ class Node(threading.Thread):
                     print(f"Node {self.node_id} finalizes Block {finalized_block.hash.hex()}")
                     self.blockchain.append(finalized_block)
 
-    def receive_message(self, message):
-        """
-        Handles incoming messages (Propose, Vote, Echo).
-        
-        :param message: The message received.
-        """
-        if message.msg_type == MessageType.PROPOSE:
-            print(f"Node {self.node_id} received proposed Block {message.content.hash.hex()}")
-            self.vote_on_block(message.content)
-
-        elif message.msg_type == MessageType.VOTE:
-            #print(f"Node {self.node_id} received vote for Block {message.content.hash.hex()}")
-            self.notarize_block(message.content)
-
-            # Send Echo message to other nodes after receiving a Vote message
-            echo_message = Message.create_echo_message(message, self.node_id)
-            self.broadcast_message(echo_message)
-
-        #elif message.msg_type == MessageType.ECHO:
-            #print(f"Node {self.node_id} received echo for message from node {message.sender}")
-            # Echo handling logic can be added here if needed
-
     def broadcast_message(self, message):
         serialized_message = message.serialize()  # Assuming Message class has serialize method
         for node in self.network.nodes:
             if node.node_id != self.node_id:
                 try:
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        print("Socket connection node class" + node.port)
                         s.connect(('localhost', node.port))
                         s.sendall(serialized_message)
                 except ConnectionRefusedError:
