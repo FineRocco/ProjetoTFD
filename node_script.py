@@ -72,8 +72,18 @@ def main():
 
                     elif message.type == MessageType.VOTE:
                         block = message.content
+                        # Ensure a list is initialized for this epoch if not already present
+                        if block.epoch not in node.votes:
+                            node.votes[block.epoch] = []
+
+                        # Append the block to the list of votes for this epoch if not already added
+                        if not any(voted_block.hash == block.hash for voted_block in node.votes[block.epoch]):
+                            node.votes[block.epoch].append(block)
+                            block.votes += 1  # Increment the vote count for this block
+                        
+                        # Notarize the block if it has enough votes
                         node.notarize_block(block)
-                        print(f"Node {node_id} check block {block.hash.hex()}.")
+                        print(f"Node {node_id} checking block {block.hash.hex()} for notarization.")
 
                     elif message.type == MessageType.TRANSACTION:
                         # Extract transaction details and add to pending transactions

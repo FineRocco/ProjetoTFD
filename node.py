@@ -95,36 +95,32 @@ class Node(threading.Thread):
         
         :param block: The block to notarize.
         """
-        #epoch_votes = self.votes.get(block.epoch, [])
-        #unique_vote_count = len({b.hash for b in epoch_votes})  # Count unique votes by block hash
-
         with self.lock:
             if block.epoch in self.notarized_blocks and self.notarized_blocks[block.epoch].hash == block.hash:
                 print(f"Block {block.hash.hex()} has already been notarized in epoch {block.epoch}")
                 return  # Block has already been notarized
 
             # Notarize the block if it has more than n/2 votes
-            print("Block votes: ", block.votes, "for block: ", block.hash.hex())
+            print(f"Node {self.node_id}: Block votes: {block.votes} for block: {block.hash.hex()} in epoch {block.epoch}")
             if block.votes > self.total_nodes // 2:
                 self.notarized_blocks[block.epoch] = block
-                print(f"Block {block.hash.hex()} notarized in epoch {block.epoch}")
-                self.finalize_blocks()
-
-    
+                print(f"Node {self.node_id}: Block {block.hash.hex()} notarized in epoch {block.epoch}")
+                self.finalize_blocks()  # Check for potential finalization
 
     def finalize_blocks(self):
         """
         Finalizes blocks when three consecutive blocks are notarized.
         """
-        with self.lock:
-            print ("Checks for finalization")
-            # Finalize logic: three consecutive notarized blocks
-            notarized_epochs = sorted(self.notarized_blocks.keys())
-            for i in range(1, len(notarized_epochs) - 1):
-                if notarized_epochs[i] == notarized_epochs[i-1] + 1 and notarized_epochs[i+1] == notarized_epochs[i] + 1:
-                    # Finalize the second block in this sequence
-                    finalized_block = self.notarized_blocks[notarized_epochs[i]]
-                    print(f"Node {self.node_id} finalizes Block {finalized_block.hash.hex()}")
+        print(f"Node {self.node_id}: Checking for finalization...")
+        notarized_epochs = sorted(self.notarized_blocks.keys())
+        
+        for i in range(1, len(notarized_epochs) - 1):
+            # Check if there are three consecutive epochs with notarized blocks
+            if notarized_epochs[i] == notarized_epochs[i - 1] + 1 and notarized_epochs[i + 1] == notarized_epochs[i] + 1:
+                # Finalize the second block in this sequence
+                finalized_block = self.notarized_blocks[notarized_epochs[i]]
+                if finalized_block not in self.blockchain:
+                    print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
                     self.blockchain.append(finalized_block)
 
     def broadcast_message(self, message):
