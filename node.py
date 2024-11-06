@@ -121,20 +121,22 @@ class Node(threading.Thread):
                 finalized_block = self.notarized_blocks[notarized_epochs[i]]
                 if finalized_block not in self.blockchain:
                     print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
-                    self.blockchain.append(finalized_block)
+                    # Finalize the entire parent chain
+                    chain = self.get_chain_to_block(finalized_block)
+                    self.blockchain.extend(chain)
 
-    def broadcast_message(self, message):
-            serialized_message = message.serialize()
-            for target_port in self.ports:
-                if target_port != self.port:  # Skip broadcasting to the node's own port
-                    try:
-                        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                            print(f"Node {self.node_id} broadcasting to port {target_port}")
-                            s.connect(('localhost', target_port))
-                            s.sendall(serialized_message)
-                    except ConnectionRefusedError:
-                        print(f"Node {self.node_id} could not connect to Node at port {target_port}")
-
+    def get_chain_to_block(self, block):
+        """
+        Helper function to get the entire parent chain up to the given block.
+        """
+        chain = []
+        current_block = block
+        while current_block and current_block not in self.blockchain:
+            chain.insert(0, current_block)  # Insert at the beginning to maintain order from genesis to the block
+            current_block = next(
+                (b for b in self.notarized_blocks.values() if b.hash == current_block.previous_hash), None
+            )
+        return chain
 
     def get_longest_notarized_chain(self):
         """
@@ -169,22 +171,34 @@ class Node(threading.Thread):
         # Return the tip of the longest notarized chain (the last block added to the chain)
         return chain[-1] if chain else None
     
-    def display_blockchain(self):
-        """
-        Displays the current state of the blockchain for this node.
-        """
-        if not self.blockchain:
-            print(f"Node {self.node_id}: Blockchain is empty.")
-            return
+    def broadcast_message(self, message):
+        serialized_message = message.serialize()
+        for target_port in self.ports:
+            if target_port != self.port:  # Skip broadcasting to the node's own port
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        print(f"Node {self.node_id} broadcasting to port {target_port}")
+                        s.connect(('localhost', target_port))
+                        s.sendall(serialized_message)
+                except ConnectionRefusedError:
+                    print(f"Node {self.node_id} could not connect to Node at port {target_port}")
     
-        print(f"Node {self.node_id}: Current Blockchain:")
-        for index, block in enumerate(self.blockchain):
-            print(f"Block {index + 1}:")
-            print(f"  Hash: {block.hash.hex()}")
-            print(f"  Previous Hash: {block.previous_hash}")
-            print(f"  Epoch: {block.epoch}")
-            print(f"  Transactions: {len(block.transactions)} transactions")
-            for tx in block.transactions:
-                print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
-            print("-" * 40)  # Separator for each block
+    # def display_blockchain(self):
+    #     """
+    #     Displays the current state of the blockchain for this node.
+    #     """
+    #     if not self.blockchain:
+    #         print(f"Node {self.node_id}: Blockchain is empty.")
+    #         return
+    
+    #     print(f"Node {self.node_id}: Current Blockchain:")
+    #     for index, block in enumerate(self.blockchain):
+    #         print(f"Block {index + 1}:")
+    #         print(f"  Hash: {block.hash.hex()}")
+    #         print(f"  Previous Hash: {block.previous_hash}")
+    #         print(f"  Epoch: {block.epoch}")
+    #         print(f"  Transactions: {len(block.transactions)} transactions")
+    #         for tx in block.transactions:
+    #             print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
+    #         print("-" * 40)  # Separator for each block
 

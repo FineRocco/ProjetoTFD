@@ -85,9 +85,11 @@ class StreamletNetwork:
         if self.transaction_thread:
             self.transaction_thread.join()  # Wait for the transaction thread to finish
 
-        for node in self.processes:
-            node.running = False
-            node.join()  # Wait for the thread to finish
+        # Terminate each node process and wait for it to close
+        for process in self.processes:
+            process.terminate()  # Send a termination signal to the subprocess
+            process.wait()  # Wait for the process to finish
+        print("All nodes and transaction generation thread stopped.")
 
     def next_leader(self):
         """

@@ -17,6 +17,12 @@ def main():
     # Run the consensus protocol for the specified number of epochs
     network.run(total_epochs)
 
+    # # Display the final blockchain for each node
+    # print("\n=== Final Blockchain for each node ===")
+    # for node_process in network.processes:
+    #     # Assuming we can call display_blockchain on each node's network reference
+    #     node_process.display_blockchain()
+
     # After completion, stop the network and join the threads
     network.stop_network()
 
