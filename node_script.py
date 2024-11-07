@@ -5,6 +5,17 @@ from node import Node
 from transaction import Transaction
 
 def main():
+    """
+    Main function for running a single node in the network.
+
+    The function initializes the node, signals readiness to the Streamlet network,
+    and listens for various message types (e.g., proposals, votes, notarizations, transactions).
+    Based on the received message type, the node performs actions like proposing blocks,
+    voting, notarizing, and displaying the blockchain.
+
+    Usage: node_script.py <node_id> <total_nodes> <port> <ports>
+    """
+    
     # Verify command-line arguments
     if len(sys.argv) < 5:
         print("Usage: node_script.py <node_id> <total_nodes> <port> <ports>")
@@ -12,11 +23,11 @@ def main():
         sys.exit(1)
 
     try:
+        # Parse command-line arguments
         node_id = int(sys.argv[1])
         total_nodes = int(sys.argv[2])
         port = int(sys.argv[3])
-        # Parse the list of ports passed as a single string argument
-        ports = list(map(int, sys.argv[4].split(',')))
+        ports = list(map(int, sys.argv[4].split(',')))  # List of network ports
 
         print(f"Starting Node {node_id} with total_nodes={total_nodes}, port={port}")
 
@@ -27,7 +38,7 @@ def main():
         # Signal readiness to the StreamletNetwork process
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ready_socket:
-                ready_socket.connect(('localhost', 6000))  # Ready port for signaling
+                ready_socket.connect(('localhost', 6000))  # Port for readiness signaling
                 ready_socket.sendall(b"READY")
             print(f"Node {node_id} sent READY signal.")
         except ConnectionRefusedError:
@@ -41,24 +52,23 @@ def main():
             sock.listen(1)
             print(f"Node {node_id} listening on port {port}")
 
+            # Main loop for handling incoming messages
             while True:
                 conn, _ = sock.accept()
                 with conn:
-                    # Use `deserialize_from_socket` to read and convert data directly from the socket
+                    # Deserialize and process the received message
                     message = Message.deserialize_from_socket(conn)
                     if message is None:
                         print(f"Deserialization failed in Node {node_id}. Ignoring message.")
                         continue
                     print(f"Node {node_id} received command: {message.type}")
 
-                    # Handle different message types
+                    # Handle various message types
                     if message.type == MessageType.START_PROPOSAL:
-                        # Validate sender and leader
+                        # Propose a new block if the node is the leader for the current epoch
                         if message.sender is not None and node_id == message.sender:
                             epoch = message.content
                             print(f"Node {node_id} is the leader for epoch {epoch}. Proceeding with proposal.")
-                            
-                            # Pass `node_id` as `leader_id` to `propose_block`
                             block = node.propose_block(epoch, leader_id=node_id)
                             if block:
                                 print(f"Node {node_id} proposed block {block.hash.hex()}.")
@@ -66,31 +76,53 @@ def main():
                             print(f"Node {node_id} is not the leader or sender is None; ignoring START_PROPOSAL.")
 
                     elif message.type == MessageType.PROPOSE:
+                        # Vote on the received proposed block
                         block = message.content
                         node.vote_on_block(block)
                         print(f"Node {node_id} voted for block {block.hash.hex()}.")
 
                     elif message.type == MessageType.VOTE:
+                        # Handle a vote on a block and update notarization if conditions are met
                         block = message.content
-                        # Ensure a list is initialized for this epoch if not already present
                         if block.epoch not in node.votes:
                             node.votes[block.epoch] = []
-
-                        # Append the block to the list of votes for this epoch if not already added
                         if not any(voted_block.hash == block.hash for voted_block in node.votes[block.epoch]):
                             node.votes[block.epoch].append(block)
-                            block.votes += 1  # Increment the vote count for this block
-                        
-                        # Notarize the block if it has enough votes
+                            block.votes += 1
                         node.notarize_block(block)
                         print(f"Node {node_id} checking block {block.hash.hex()} for notarization.")
 
+                    elif message.type == MessageType.ECHO_NOTARIZE:
+                        # Update the node’s view of notarized blocks based on an echo message
+                        block = message.content
+                        if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
+                            node.notarized_blocks[block.epoch] = block
+                            print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
+                            node.finalize_blocks()  # Re-check finalization criteria
+
                     elif message.type == MessageType.TRANSACTION:
-                        # Extract transaction details and add to pending transactions
-                        tx_data = message.content  # tx_data is expected to be a dictionary
+                        # Process and broadcast a new transaction
+                        tx_data = message.content
                         transaction = Transaction(tx_data['tx_id'], tx_data['sender'], tx_data['receiver'], tx_data['amount'])
-                        node.pending_transactions.append(transaction)
-                        print(f"Node {node_id} added transaction {transaction.tx_id} to pending transactions.")
+                        print(f"Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}")
+                        
+                        if transaction not in node.pending_transactions:
+                            node.add_transaction(transaction)
+                            print(f"Node {node_id} added transaction {transaction.tx_id} to pending transactions.")
+                            echo_message = Message.create_echo_transaction_message(transaction, node_id)
+                            node.broadcast_message(echo_message)
+
+                    elif message.type == MessageType.ECHO_TRANSACTION:
+                        # Add echoed transaction to pending transactions if it’s new
+                        transaction = message.content
+                        print(f"Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}")
+                        if transaction not in node.pending_transactions:
+                            node.add_transaction(transaction)
+                            print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions.")
+
+                    elif message.type == MessageType.DISPLAY_BLOCKCHAIN:
+                        # Display the current blockchain of the node
+                        node.display_blockchain()
 
     except Exception as e:
         print(f"Error in Node {node_id}: {e}")

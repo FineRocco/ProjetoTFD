@@ -1,5 +1,5 @@
 class Transaction:
-    def __init__(self, sender: int, receiver: int, tx_id: int, amount: float):
+    def __init__(self, sender: int, receiver: int, tx_id: int, amount: int):
         """
         Initializes a Transaction object.
         
