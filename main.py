@@ -17,7 +17,7 @@ def main():
     print(f"Starting Streamlet Protocol with {num_nodes} nodes and {total_epochs} epochs.")
 
     # Create a new Streamlet Network 
-    network = StreamletNetwork(num_nodes,delta, 5000)
+    network = StreamletNetwork(num_nodes,delta, 8000)
     
     # Start the nodes in the network
     network.start_network()
