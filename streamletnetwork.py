@@ -1,5 +1,7 @@
+import os
 import random
 import socket
+import sys
 import threading
 import time
 from message import Message, MessageType
@@ -8,6 +10,8 @@ from block import Block
 from transaction import Transaction
 import subprocess
 
+current_directory = os.path.dirname(os.path.abspath(__file__))
+node_script_path = os.path.join(current_directory, "node_script.py")
 class StreamletNetwork:
     """
     Manages a network of nodes implementing the Streamlet Protocol, coordinating epoch cycles, 
@@ -54,10 +58,21 @@ class StreamletNetwork:
         for i in range(self.num_nodes):
             node_port = self.ports[i]
             port_list = ",".join(map(str, self.ports))  # Ports to pass to each node
-            process = subprocess.Popen(
-                ["python", "node_script.py", str(i), str(self.num_nodes), str(node_port), port_list],
-                creationflags=subprocess.CREATE_NEW_CONSOLE
-            )
+            if sys.platform == "win32":
+                process = subprocess.Popen(
+                    ["python3", node_script_path, str(i), str(self.num_nodes), str(node_port), port_list],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE
+                )
+            elif sys.platform == "darwin":  # macOS
+                # Using osascript to open a new terminal window
+                command = f'osascript -e \'tell application "Terminal" to do script "python3 {node_script_path} {i} {self.num_nodes} {node_port} {port_list}"\''
+                process = subprocess.Popen(command, shell=True)
+            else:
+                process = subprocess.Popen(
+                    ["python3", node_script_path, str(i), str(self.num_nodes), str(node_port), port_list]
+                )
+                self.processes.append(process)
+
             self.processes.append(process)
 
         # Listen for readiness signals from nodes
