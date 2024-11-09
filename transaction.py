@@ -1,15 +1,23 @@
 class Transaction:
-    def __init__(self, sender: int, receiver: int, tx_id: int, amount: int):
-        """
-        Initializes a Transaction object.
-        
-        :param sender: The sender of the transaction.
-        :param receiver: The receiver of the transaction.
-        :param tx_id: A unique transaction id.
-        :param amount: The amount to be transferred.
-        """
+    def __init__(self, tx_id, sender, receiver, amount):
+        self.tx_id = tx_id
         self.sender = sender
         self.receiver = receiver
-        self.tx_id = tx_id
         self.amount = amount
-
+    
+    def to_dict(self):
+        return {
+            'tx_id': self.tx_id,
+            'sender': self.sender,
+            'receiver': self.receiver,
+            'amount': self.amount
+        }
+    
+    @staticmethod
+    def from_dict(data):
+        return Transaction(
+            tx_id=data['tx_id'],
+            sender=data['sender'],
+            receiver=data['receiver'],
+            amount=data['amount']
+        )

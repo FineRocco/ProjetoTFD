@@ -12,6 +12,7 @@ import subprocess
 
 current_directory = os.path.dirname(os.path.abspath(__file__))
 node_script_path = os.path.join(current_directory, "node_script.py")
+
 class StreamletNetwork:
     """
     Manages a network of nodes implementing the Streamlet Protocol, coordinating epoch cycles, 
@@ -19,13 +20,6 @@ class StreamletNetwork:
     """
     
     def __init__(self, num_nodes, delta, base_port):
-        """
-        Initializes a StreamletNetwork instance with multiple nodes.
-
-        :param num_nodes: int - The number of nodes in the network.
-        :param delta: int - The network delay parameter (∆), determining epoch duration.
-        :param base_port: int - The starting port number; each node is assigned an incremented port.
-        """
         self.num_nodes = num_nodes
         self.leader = 0  # Initially, node 0 is the leader
         self.leader_port = 0
@@ -40,12 +34,9 @@ class StreamletNetwork:
         self.transaction_thread = None  # To store the transaction generation thread
         self.generate_transactions = True  # Flag to control transaction generation
 
-        # Initialize genesis block for each node
-        self.genesis_block = Block(epoch=0, previous_hash=b'0', transactions=[])
-        for node in self.processes:
-            node.blockchain.append(self.genesis_block)  # Start all nodes with the genesis block
-            node.notarized_blocks[0] = self.genesis_block  # Genesis block is notarized from the start
-
+        # Initialize genesis block
+        self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions=[])
+    
     def start_network(self):
         """
         Launches each node as a separate process and waits for them to be ready. 
@@ -71,8 +62,6 @@ class StreamletNetwork:
                 process = subprocess.Popen(
                     ["python3", node_script_path, str(i), str(self.num_nodes), str(node_port), port_list]
                 )
-                self.processes.append(process)
-
             self.processes.append(process)
 
         # Listen for readiness signals from nodes
@@ -130,9 +119,13 @@ class StreamletNetwork:
         print(f"Epoch {epoch}: Initiating block proposal by leader node {self.leader}")
 
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            strat_propose_message = Message.create_start_proposal_message(epoch, self.leader)
-            sock.connect(('localhost', self.leader_port))
-            sock.sendall(strat_propose_message.serialize())
+            start_proposal_message = Message.create_start_proposal_message(epoch, self.leader)
+            try:
+                sock.connect(('localhost', self.leader_port))
+                sock.sendall(start_proposal_message.serialize())
+                print(f"Sent START_PROPOSAL for epoch {epoch} to leader Node {self.leader}")
+            except ConnectionRefusedError:
+                print(f"Could not connect to leader Node {self.leader} at port {self.leader_port}")
 
     def run(self, total_epochs):
         """
@@ -150,8 +143,9 @@ class StreamletNetwork:
             try:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     sock.connect(('localhost', port))
-                    display_message = Message.create_display_blockchain_message(None, sender=0)
+                    display_message = Message.create_display_blockchain_message(sender=0)
                     sock.sendall(display_message.serialize())
+                    print(f"Sent DISPLAY_BLOCKCHAIN to Node at port {port}")
             except ConnectionRefusedError:
                 print(f"Could not connect to Node at port {port} to display blockchain.")
 
@@ -184,7 +178,7 @@ class StreamletNetwork:
 
         # Send transaction to a random node
         target_port = random.choice(self.ports)
-        transaction_message = Message.create_transaction_message(transaction, 0)
+        transaction_message = Message.create_transaction_message(Transaction(**transaction), sender=0)
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect(('localhost', target_port))

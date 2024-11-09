@@ -4,6 +4,8 @@ from message import Message, MessageType
 from node import Node
 from transaction import Transaction
 
+
+
 def main():
     """
     Main function for running a single node in the network.
@@ -85,13 +87,30 @@ def main():
                     elif message.type == MessageType.VOTE:
                         # Handle a vote on a block and update notarization if conditions are met
                         block = message.content
+                        block_hash = block.hash.hex()
+                        sender_id = message.sender  # Ensure the message includes sender ID
+
+                        print(f"Node {node_id}: Received Vote from Node {sender_id} for Block {block_hash} in epoch {block.epoch}")
+
+                        # Initialize vote tracking structures
                         if block.epoch not in node.votes:
                             node.votes[block.epoch] = []
-                        if not any(voted_block.hash == block.hash for voted_block in node.votes[block.epoch]):
+                        if block_hash not in node.voted_senders:
+                            node.voted_senders[block_hash] = set()
+
+                        # Check if this sender has already voted for this block
+                        if sender_id not in node.voted_senders[block_hash]:
+                            # Add vote and update vote counts
                             node.votes[block.epoch].append(block)
-                            block.votes += 1
+                            node.vote_counts[block_hash] = node.vote_counts.get(block_hash, 0) + 1
+                            node.voted_senders[block_hash].add(sender_id)
+                            print(f"Node {node_id}: Updated vote count for Block {block_hash} to {node.vote_counts[block_hash]}")
+                        else:
+                            print(f"Node {node_id}: Duplicate vote from Node {sender_id} for Block {block_hash}; ignoring.")
+
+                        # Check notarization condition
                         node.notarize_block(block)
-                        print(f"Node {node_id} checking block {block.hash.hex()} for notarization.")
+                        print(f"Node {node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
 
                     elif message.type == MessageType.ECHO_NOTARIZE:
                         # Update the node’s view of notarized blocks based on an echo message
@@ -103,8 +122,7 @@ def main():
 
                     elif message.type == MessageType.TRANSACTION:
                         # Process and broadcast a new transaction
-                        tx_data = message.content
-                        transaction = Transaction(tx_data['tx_id'], tx_data['sender'], tx_data['receiver'], tx_data['amount'])
+                        transaction = message.content
                         print(f"Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}")
                         
                         if transaction not in node.pending_transactions:
