@@ -48,11 +48,7 @@ def main():
 
         # Start listening for commands on the designated port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            print('testing')
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('localhost', port))
-            print('exot')
-            
             sock.listen(1)
             print(f"Node {node_id} listening on port {port}")
 
