@@ -1,3 +1,5 @@
+# message.py
+
 import json
 from block import Block
 from transaction import Transaction
@@ -12,42 +14,89 @@ class MessageType:
     DISPLAY_BLOCKCHAIN = "DISPLAY_BLOCKCHAIN"
 
 class Message:
+    """
+    Representa uma mensagem a ser trocada entre os nós.
+    """
+    
     def __init__(self, message_type, content, sender=None):
+        """
+        :param message_type: str - Tipo da mensagem.
+        :param content: Vários - Conteúdo da mensagem, dependendo do tipo.
+        :param sender: int - ID do nó remetente.
+        """
         self.type = message_type
-        self.content = content  # Can be a Block, Transaction, int, or None
-        self.sender = sender    # Sender node ID
+        self.content = content    
+        self.sender = sender      
     
     def serialize(self):
+        """
+        Serializa a mensagem para bytes para envio via rede.
+        """
+        if isinstance(self.content, Block):
+            content = self.content.to_dict()
+        elif isinstance(self.content, Transaction):
+            content = self.content.to_dict()
+        elif isinstance(self.content, dict):
+            content = self.content  
+        else:
+            content = self.content  
+        
         return json.dumps({
             'type': self.type,
-            'content': self.content.to_dict() if hasattr(self.content, 'to_dict') else self.content,
-            'sender': self.sender
+            'content': content,
+            'sender': self.sender,
         }).encode('utf-8')
     
     @staticmethod
-    def deserialize_from_socket(conn):
+    def deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids):
+        """
+        Desserializa uma mensagem recebida de um socket.
+        
+        :param conn: socket - Conexão de onde a mensagem foi recebida.
+        :param blockchain_tx_ids: set - Conjunto de tx_ids já incluídas na blockchain.
+        :param notarized_tx_ids: set - Conjunto de tx_ids já notarizadas.
+        :return: Message ou None
+        """
         try:
-            data = conn.recv(4096)
+            data = conn.recv(4096)  
             if not data:
+                print("No data received from socket.")
                 return None
-            message_dict = json.loads(data.decode('utf-8'))
-            message_type = message_dict['type']
-            content = message_dict['content']
-            sender = message_dict.get('sender', None)
+            obj = json.loads(data.decode('utf-8'))
+            msg_type = obj['type']
+            content = obj['content']
+            sender = obj.get('sender', None)
     
-            # Reconstruct the content object based on message type
-            if message_type in [MessageType.PROPOSE, MessageType.VOTE, MessageType.ECHO_NOTARIZE]:
-                content = Block.from_dict(content)  # Deserialize as a Block object
-            elif message_type in [MessageType.TRANSACTION, MessageType.ECHO_TRANSACTION]:
-                content = Transaction.from_dict(content)  # Deserialize as a Transaction object
-            elif message_type == MessageType.START_PROPOSAL:
-                content = int(content)
-            elif message_type == MessageType.DISPLAY_BLOCKCHAIN:
-                content = None  # No content needed for display
-
-            return Message(message_type, content, sender)
+            if msg_type in [MessageType.PROPOSE, MessageType.ECHO_NOTARIZE, MessageType.VOTE]:
+                content = Block.from_dict(content)
+            elif msg_type in [MessageType.TRANSACTION, MessageType.ECHO_TRANSACTION]:
+                transaction_data = content.get('transaction')
+                epoch = content.get('epoch')
+                transaction = Transaction.from_dict(transaction_data)
+                content = {'transaction': transaction, 'epoch': epoch}
+            elif msg_type == MessageType.START_PROPOSAL:
+                content = int(content) 
+            elif msg_type == MessageType.DISPLAY_BLOCKCHAIN:
+                content = None  
+            else:
+                print(f"Unknown message type: {msg_type}")
+                return None
+    
+            if msg_type in [MessageType.TRANSACTION, MessageType.ECHO_TRANSACTION]:
+                tx_id = content['transaction'].tx_id
+                if tx_id in blockchain_tx_ids:
+                    print(f"Transaction {tx_id} already included in blockchain. Ignoring.")
+                    return None
+                if tx_id in notarized_tx_ids:
+                    print(f"Transaction {tx_id} already notarized. Ignoring.")
+                    return None
+    
+            return Message(msg_type, content, sender)
+        except json.JSONDecodeError as e:
+            print(f"JSON decode error: {e}")
+            return None
         except Exception as e:
-            print(f"Failed to deserialize message: {e}")
+            print(f"Error during deserialization from socket: {e}")
             return None
     
     @staticmethod
@@ -67,12 +116,12 @@ class Message:
         return Message(MessageType.ECHO_NOTARIZE, block, sender)
     
     @staticmethod
-    def create_transaction_message(transaction, sender):
-        return Message(MessageType.TRANSACTION, transaction, sender)
+    def create_transaction_message(transaction, epoch, sender):
+        return Message(MessageType.TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
-    def create_echo_transaction_message(transaction, sender):
-        return Message(MessageType.ECHO_TRANSACTION, transaction, sender)
+    def create_echo_transaction_message(transaction, epoch, sender):
+        return Message(MessageType.ECHO_TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
     def create_display_blockchain_message(sender):

@@ -1,17 +1,15 @@
+# streamletnetwork.py
+
 import os
 import random
 import socket
 import sys
 import threading
 import time
-from message import Message, MessageType
-from node import Node
 from block import Block
+from message import Message, MessageType
 from transaction import Transaction
 import subprocess
-
-current_directory = os.path.dirname(os.path.abspath(__file__))
-node_script_path = os.path.join(current_directory, "node_script.py")
 
 class StreamletNetwork:
     """
@@ -30,17 +28,13 @@ class StreamletNetwork:
         self.processes = []  # To store Popen process references
         self.ports = [base_port + i for i in range(num_nodes)]  # Port assignment for nodes
         print("Port allocation:", self.ports)
-
-        self.transaction_thread = None  # To store the transaction generation thread
-        self.generate_transactions = True  # Flag to control transaction generation
-
+        
         # Initialize genesis block
-        self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions=[])
+        self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions={})
     
     def start_network(self):
         """
-        Launches each node as a separate process and waits for them to be ready. 
-        Starts the transaction generation thread once nodes are ready.
+        Launches each node as a separate process and waits for them to be ready.
         """
         ready_port = 6000  # Port for readiness signaling
         ready_count = 0
@@ -51,16 +45,16 @@ class StreamletNetwork:
             port_list = ",".join(map(str, self.ports))  # Ports to pass to each node
             if sys.platform == "win32":
                 process = subprocess.Popen(
-                    ["python3", node_script_path, str(i), str(self.num_nodes), str(node_port), port_list],
+                    ["python3", "node_script.py", str(i), str(self.num_nodes), str(node_port), port_list],
                     creationflags=subprocess.CREATE_NEW_CONSOLE
                 )
             elif sys.platform == "darwin":  # macOS
                 # Using osascript to open a new terminal window
-                command = f'osascript -e \'tell application "Terminal" to do script "python3 {node_script_path} {i} {self.num_nodes} {node_port} {port_list}"\''
+                command = f'osascript -e \'tell application "Terminal" to do script "python3 {os.path.join(os.getcwd(), "node_script.py")} {i} {self.num_nodes} {node_port} {port_list}"\''
                 process = subprocess.Popen(command, shell=True)
             else:
                 process = subprocess.Popen(
-                    ["python3", node_script_path, str(i), str(self.num_nodes), str(node_port), port_list]
+                    ["python3", "node_script.py", str(i), str(self.num_nodes), str(node_port), port_list]
                 )
             self.processes.append(process)
 
@@ -80,26 +74,16 @@ class StreamletNetwork:
 
         print("All nodes are ready!")
 
-        # Start the transaction generation thread
-        self.transaction_thread = threading.Thread(target=self.generate_transactions_periodically, args=(5,))
-        self.transaction_thread.daemon = True  # Daemon thread to close with main program
-        self.transaction_thread.start()
-        print("Transaction generation thread started.")
-
     def stop_network(self):
         """
-        Terminates all node processes and stops the transaction generation thread.
+        Terminates all node processes.
         """
-        # Stop transaction generation
-        self.generate_transactions = False
-        if self.transaction_thread:
-            self.transaction_thread.join()  # Wait for transaction thread to finish
-
+        
         # Terminate each node process and wait for completion
         for process in self.processes:
             process.terminate()
             process.wait()
-        print("All nodes and transaction generation thread stopped.")
+        print("All nodes stopped.")
 
     def next_leader(self):
         """
@@ -114,6 +98,7 @@ class StreamletNetwork:
 
         :param epoch: int - The current epoch number.
         """
+        self.generate_transactions_for_epoch(epoch)
         self.next_leader()
         self.leader_port = self.ports[self.leader]
         print(f"Epoch {epoch}: Initiating block proposal by leader node {self.leader}")
@@ -159,9 +144,11 @@ class StreamletNetwork:
             self.global_tx_id += 1
             return self.global_tx_id
 
-    def generate_random_transaction(self):
+    def generate_random_transaction_for_epoch(self, epoch):
         """
-        Creates a random transaction and sends it to a randomly selected node in the network.
+        Creates a random transaction and sends it to a randomly selected node in the network for a specific epoch.
+
+        :param epoch: int - The epoch to which the transaction belongs.
         """
         sender = f"Client{random.randint(1, 100)}"
         receiver = f"Client{random.randint(1, 100)}"
@@ -169,16 +156,11 @@ class StreamletNetwork:
 
         # Generate a unique transaction ID
         tx_id = self.get_next_tx_id()
-        transaction = {
-            'sender': sender,
-            'receiver': receiver,
-            'tx_id': tx_id,
-            'amount': amount
-        }
+        transaction = Transaction(tx_id, sender, receiver, amount)
 
         # Send transaction to a random node
         target_port = random.choice(self.ports)
-        transaction_message = Message.create_transaction_message(Transaction(**transaction), sender=0)
+        transaction_message = Message.create_transaction_message(transaction, epoch, sender=0)
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 s.connect(('localhost', target_port))
@@ -187,12 +169,12 @@ class StreamletNetwork:
         except ConnectionRefusedError:
             print(f"Failed to send transaction to Node at port {target_port}.")
 
-    def generate_transactions_periodically(self, interval):
+    def generate_transactions_for_epoch(self, epoch):
         """
-        Generates transactions at regular intervals and distributes them to random nodes.
+        Generates a random number of transactions for a specific epoch.
 
-        :param interval: int - The interval in seconds between each transaction generation.
+        :param epoch: int - The epoch for which transactions are to be generated.
         """
-        while self.generate_transactions:
-            self.generate_random_transaction()
-            time.sleep(interval)
+        num_transactions = random.randint(1, 3)  # Random number of transactions per epoch
+        for _ in range(num_transactions):
+            self.generate_random_transaction_for_epoch(epoch)
