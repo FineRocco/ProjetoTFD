@@ -82,3 +82,14 @@ To run the simulation, follow these steps:
   - **ECHO_TRANSACTION**: Adds echoed transactions to ensure consistent transaction state across nodes.
   - **DISPLAY_BLOCKCHAIN**: Outputs the current blockchain state to the console.
 - **Error Handling**: Logs and handles potential exceptions during message processing to maintain robustness.
+
+## `Professor`
+
+Retirar prints, so interesaa a blockchain
+
+20 epocas, so pode ter 19 blocos finalizados
+
+fazer testes com 2 nos a crashar
+
+O terminal main do streamlet network devia desaparecer depois de iniciar a blockhcain. 
+
