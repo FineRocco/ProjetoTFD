@@ -72,6 +72,7 @@ class Node(threading.Thread):
 
         :param block: Block - The proposed block.
         """
+        print(f"Node {self.node_id}: Preparing to vote on Block {block.hash.hex()} with transactions: {list(block.transactions.keys())}")
         longest_notarized_block = self.get_longest_notarized_chain()
         if longest_notarized_block and block.epoch <= longest_notarized_block.epoch:
             print(f"Node {self.node_id}: Ignorando votação para Block {block.hash.hex()} em epoch {block.epoch} (epoch <= {longest_notarized_block.epoch})")
@@ -119,7 +120,7 @@ class Node(threading.Thread):
             # Check if vote count meets quorum
             if self.vote_counts.get(block_hash, 0) > self.total_nodes // 2:
                 self.notarized_blocks[block.epoch] = block
-                print(f"Node {self.node_id}: Block {block_hash} notarized in epoch {block.epoch}")
+                print(f"Node {self.node_id}: Block {block_hash} notarized in epoch {block.epoch} with transactions {list(block.transactions.keys())}")
 
                 for tx_id in block.transactions.keys():
                     self.notarized_tx_ids.add(tx_id)
@@ -131,7 +132,7 @@ class Node(threading.Thread):
                 self.finalize_blocks()
 
     def finalize_blocks(self):
-        print(f"Node {self.node_id}: Checking for finalization...")
+        print(f"Node {self.node_id}: Checking for finalization. Current blockchain: {[(b.epoch, list(b.transactions.keys())) for b in self.blockchain]}")
         notarized_epochs = sorted(self.notarized_blocks.keys())
         print(f"Node {self.node_id}: Notarized epochs: {notarized_epochs}")
         
@@ -143,20 +144,6 @@ class Node(threading.Thread):
                     print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
                     chain = self.get_chain_to_block(finalized_block)
                     self.blockchain.extend(chain)
-
-                    block_tx_ids = {tx.tx_id for tx in finalized_block.transactions.values()}
-                    removed = 0
-                    for tx_id in block_tx_ids:
-                        # Remover da lista de transações pendentes do epoch correspondente
-                        for epoch, txs in self.pending_transactions.items():
-                            tx_to_remove = next((tx for tx in txs if tx.tx_id == tx_id), None)
-                            if tx_to_remove:
-                                txs.remove(tx_to_remove)
-                                removed += 1
-                                print(f"Node {self.node_id}: Removed transaction {tx_id} from pending_transactions for epoch {epoch}.")
-                                break
-                    if removed > 0:
-                        print(f"Node {self.node_id}: Removed {removed} transactions from pending_transactions after finalizing the block.")
 
     def get_chain_to_block(self, block):
         chain = []
@@ -177,28 +164,33 @@ class Node(threading.Thread):
 
     def add_transaction(self, transaction, epoch):
         with self.lock:
-            print(f"Adding transaction: {transaction.tx_id} (type: {type(transaction.tx_id)})")
-            print(f"Current pending_transactions: {self.pending_transactions}")
-            
-            if epoch not in self.pending_transactions:
-                self.pending_transactions[epoch] = []
-            
+            next_epoch = epoch + 1
+            print(f"Node {self.node_id}: Adding transaction {transaction.tx_id} to pending transactions for epoch {next_epoch}")
+            print(f"Node {self.node_id}: Current pending transactions before add: {self.pending_transactions}")
+
+            # Ensure the next epoch entry is initialized if it doesn't exist
+            if next_epoch not in self.pending_transactions:
+                self.pending_transactions[next_epoch] = []
+
+            # Check if the transaction already exists in the blockchain or is notarized
             for block in self.blockchain:
                 if transaction.tx_id in block.transactions:
                     print(f"Node {self.node_id}: Transaction {transaction.tx_id} already included in blockchain. Ignoring.")
                     return
-            
+
             if transaction.tx_id in self.notarized_tx_ids:
                 print(f"Node {self.node_id}: Transaction {transaction.tx_id} already notarized. Ignoring.")
                 return
 
+            # Avoid adding the transaction if it's already in the pending list
             for txs in self.pending_transactions.values():
                 if any(tx.tx_id == transaction.tx_id for tx in txs):
                     print(f"Node {self.node_id}: Transaction {transaction.tx_id} already exists in pending transactions. Ignoring.")
                     return
 
-            self.pending_transactions[epoch].append(transaction)
-            print(f"Node {self.node_id} added transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
+            # Add the transaction to the pending list for the next epoch
+            self.pending_transactions[next_epoch].append(transaction)
+            print(f"Node {self.node_id} added transaction {transaction.tx_id} to pending transactions for epoch {next_epoch}.")
 
     def broadcast_message(self, message):
         serialized_message = message.serialize()
@@ -228,6 +220,6 @@ class Node(threading.Thread):
             print(f"  Epoch: {block.epoch}")
             print(f"  Transactions: {len(block.transactions)} transactions")
             
-            for tx_id, tx in block.transactions.items():
-                print(f"    Transaction {tx.tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
+            for tx_id, tx in block.transactions.items():  # Unpack tx_id and Transaction object
+                print(f"    Transaction {tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
             print("-" * 40)  # Separator for each block
