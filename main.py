@@ -1,11 +1,12 @@
 import argparse
+import time
 from streamletnetwork import StreamletNetwork
 
 def main():
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Run the Streamlet Protocol with customizable parameters.")
-    parser.add_argument("--num_nodes", type=int, default=3, help="The number of nodes in the network.")
-    parser.add_argument("--total_epochs", type=int, default=8, help="The total number of epochs to run.")
+    parser.add_argument("--num_nodes", type=int, default=5, help="The number of nodes in the network.")
+    parser.add_argument("--total_epochs", type=int, default=10, help="The total number of epochs to run.")
     parser.add_argument("--delta", type=int, default=2, help="The network delay parameter (∆).")
 
     args = parser.parse_args()
@@ -25,8 +26,9 @@ def main():
     # Run the consensus protocol for the specified number of epochs
     network.run(total_epochs)
 
-    # # After completion, stop the network and join the threads
-    # network.stop_network()
+    # After completion, stop the network and join the threads
+    time.sleep(60)
+    network.stop_network()
 
     print("Streamlet Protocol finished.")
 
