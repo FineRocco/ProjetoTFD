@@ -1,10 +1,11 @@
-# message.py
-
 import json
 from block import Block
 from transaction import Transaction
 
 class MessageType:
+    """
+    Defines constants for the various message types exchanged between nodes in the network.
+    """
     START_PROPOSAL = "START_PROPOSAL"
     PROPOSE = "PROPOSE"
     VOTE = "VOTE"
@@ -15,14 +16,22 @@ class MessageType:
 
 class Message:
     """
-    Representa uma mensagem a ser trocada entre os nós.
+    Represents a message exchanged between nodes in the network.
+    
+    Attributes:
+    - type (str): The type of the message (e.g., PROPOSE, VOTE).
+    - content (various): The content of the message, varies based on the message type.
+    - sender (int): ID of the sending node.
     """
     
     def __init__(self, message_type, content, sender=None):
         """
-        :param message_type: str - Tipo da mensagem.
-        :param content: Vários - Conteúdo da mensagem, dependendo do tipo.
-        :param sender: int - ID do nó remetente.
+        Initializes a new Message object.
+
+        Parameters:
+        - message_type (str): The type of message.
+        - content (varies): The content of the message, depending on the type.
+        - sender (int, optional): The ID of the sender node.
         """
         self.type = message_type
         self.content = content    
@@ -30,7 +39,10 @@ class Message:
     
     def serialize(self):
         """
-        Serializa a mensagem para bytes para envio via rede.
+        Serializes the message to bytes for network transmission.
+
+        Returns:
+        - bytes: The serialized message in JSON format.
         """
         if isinstance(self.content, Block):
             content = self.content.to_dict()
@@ -50,12 +62,15 @@ class Message:
     @staticmethod
     def deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids):
         """
-        Desserializa uma mensagem recebida de um socket.
-        
-        :param conn: socket - Conexão de onde a mensagem foi recebida.
-        :param blockchain_tx_ids: set - Conjunto de tx_ids já incluídas na blockchain.
-        :param notarized_tx_ids: set - Conjunto de tx_ids já notarizadas.
-        :return: Message ou None
+        Deserializes a message received from a socket.
+
+        Parameters:
+        - conn (socket): The socket connection from which data is received.
+        - blockchain_tx_ids (set): Set of transaction IDs already included in the blockchain.
+        - notarized_tx_ids (set): Set of transaction IDs already notarized.
+
+        Returns:
+        - Message: A Message object or None if deserialization fails.
         """
         try:
             data = conn.recv(4096)  
@@ -75,7 +90,7 @@ class Message:
                 transaction = Transaction.from_dict(transaction_data)
                 content = {'transaction': transaction, 'epoch': epoch}
             elif msg_type == MessageType.START_PROPOSAL:
-                content = int(content) 
+                content = int(content)
             elif msg_type == MessageType.DISPLAY_BLOCKCHAIN:
                 content = None  
             else:
@@ -101,28 +116,99 @@ class Message:
     
     @staticmethod
     def create_start_proposal_message(epoch, sender):
+        """
+        Creates a START_PROPOSAL message.
+
+        Parameters:
+        - epoch (int): The epoch for which the proposal is being started.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type START_PROPOSAL.
+        """
         return Message(MessageType.START_PROPOSAL, epoch, sender)
     
     @staticmethod
     def create_propose_message(block, sender):
+        """
+        Creates a PROPOSE message.
+
+        Parameters:
+        - block (Block): The block being proposed.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type PROPOSE.
+        """
         return Message(MessageType.PROPOSE, block, sender)
     
     @staticmethod
     def create_vote_message(block, sender):
+        """
+        Creates a VOTE message.
+
+        Parameters:
+        - block (Block): The block being voted on.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type VOTE.
+        """
         return Message(MessageType.VOTE, block, sender)
     
     @staticmethod
     def create_echo_notarize_message(block, sender):
+        """
+        Creates an ECHO_NOTARIZE message.
+
+        Parameters:
+        - block (Block): The block being notarized.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type ECHO_NOTARIZE.
+        """
         return Message(MessageType.ECHO_NOTARIZE, block, sender)
     
     @staticmethod
     def create_transaction_message(transaction, epoch, sender):
+        """
+        Creates a TRANSACTION message.
+
+        Parameters:
+        - transaction (Transaction): The transaction to be sent.
+        - epoch (int): The epoch during which the transaction is created.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type TRANSACTION.
+        """
         return Message(MessageType.TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
     def create_echo_transaction_message(transaction, epoch, sender):
+        """
+        Creates an ECHO_TRANSACTION message.
+
+        Parameters:
+        - transaction (Transaction): The transaction to be echoed.
+        - epoch (int): The epoch during which the transaction is created.
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type ECHO_TRANSACTION.
+        """
         return Message(MessageType.ECHO_TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
     def create_display_blockchain_message(sender):
+        """
+        Creates a DISPLAY_BLOCKCHAIN message.
+
+        Parameters:
+        - sender (int): The ID of the sending node.
+
+        Returns:
+        - Message: A Message object of type DISPLAY_BLOCKCHAIN.
+        """
         return Message(MessageType.DISPLAY_BLOCKCHAIN, None, sender)
