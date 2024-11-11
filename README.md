@@ -93,3 +93,19 @@ fazer testes com 2 nos a crashar
 
 O terminal main do streamlet network devia desaparecer depois de iniciar a blockhcain. 
 
+Os nós deviam gerar as transactions
+
+A network tem de definjr uma seed para o random e passa a seed para todos os nós, e cada nó usa a seed para gerar um numero random para definir o lider entre eles. O prof disse
+
+A network server para iniciar a blockchain e depois fechar
+
+Deviamos usar os mesmos sockets, sem abrir e fechar sockets para cada broadcast que fazemos. O prof disse
+
+Começar com um tempo definido para arrancar  & uma lista de ip, ports e node_id & configurações (nu_nodes, num_epocas, delta)
+
+Quando um broadcast é feito e um nó crashou, os outros nó definem esse socket como null e o próximo broadcast os tentam connectar de novo a esse
+
+O genesis block é o block 0
+
+Seriam 21 blocos no total para 20 época, mas 19 blocos finalizados na blockchain
+
