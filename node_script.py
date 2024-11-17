@@ -1,6 +1,9 @@
+from datetime import datetime, timedelta
 import random
 import socket
 import sys
+import threading
+import time
 from message import Message, MessageType
 from node import Node
 from transaction import Transaction
@@ -31,110 +34,31 @@ def main():
         delta = int(sys.argv[4])
         port = int(sys.argv[5])
         ports = list(map(int, sys.argv[6].split(',')))  # List of network ports
+        start_time = sys.argv[7]  # Start time in HH:MM format
 
         print(f"Starting Node {node_id} with total_nodes={total_nodes}, port={port}")
 
         # Initialize the Node
-        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports)
-
-        # Signal readiness to the StreamletNetwork process
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ready_socket:
-                ready_socket.connect(('localhost', 6000))  # Port for readiness signaling
-                ready_socket.sendall(b"READY")
-            print(f"Node {node_id} sent READY signal.")
-        except ConnectionRefusedError:
-            print(f"Error: Could not connect to readiness port 6000 for Node {node_id}")
-        except Exception as e:
-            print(f"Unexpected error in readiness signaling for Node {node_id}: {e}")
+        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time)
 
         # Start listening for commands on the designated port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('localhost', port))
-            sock.listen()
+            sock.listen(10)
             print(f"Node {node_id} listening on port {port}")
 
-            # Main loop for handling incoming messages
-            while True:
-                conn, _ = sock.accept()
-                with conn:
-                    blockchain_tx_ids = set()
-                    for block in node.blockchain:
-                        blockchain_tx_ids.update(block.transactions.keys())
-                    
-                    notarized_tx_ids = node.notarized_tx_ids
+            node.running = True
 
-                    message = Message.deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids)
-                    if message is None:
-                        print(f"Deserialization failed in Node {node_id}. Ignoring message.")
-                        continue
-                    print(f"Node {node_id} received command: {message.type}")
+            # Start listening for incoming messages in a separate thread
+            threading.Thread(target=node.handle_incoming_messages, args=(sock,), daemon=True).start()
 
-                    # Handle various message types
-                    if message.type == MessageType.PROPOSE:
-                        # Vote on the received proposed block
-                        block = message.content
-                        node.vote_on_block(block)
-                        print(f"Node {node_id} voted for block {block.hash.hex()}.")
+            node.initialize_sockets()  # Set up connections with other nodes
+            # Start the node's main protocol logic
+            node.set_seed("toleranciaedfaltadeintrusoes", sock)
+            node.start()
+            print(f"Socket fileno: {sock.fileno()} (should be >= 0 if open)")
 
-                    elif message.type == MessageType.VOTE:
-                        # Handle a vote on a block and update notarization if conditions are met
-                        block = message.content
-                        block_hash = block.hash.hex()
-                        sender_id = message.sender  # Ensure the message includes sender ID
-
-                        print(f"Node {node_id}: Received Vote from Node {sender_id} for Block {block_hash} in epoch {block.epoch}")
-
-                        # Initialize vote tracking structures
-                        if block_hash not in node.vote_counts:
-                            node.vote_counts[block_hash] = 0
-                        if block_hash not in node.voted_senders:
-                            node.voted_senders[block_hash] = set()
-
-                        # Check if this sender has already voted for this block
-                        if sender_id not in node.voted_senders[block_hash]:
-                            # Add vote and update vote counts
-                            node.vote_counts[block_hash] += 1
-                            node.voted_senders[block_hash].add(sender_id)
-                            print(f"Node {node_id}: Updated vote count for Block {block_hash} to {node.vote_counts[block_hash]}")
-                        else:
-                            print(f"Node {node_id}: Duplicate vote from Node {sender_id} for Block {block_hash}; ignoring.")
-
-                        # Check notarization condition
-                        node.notarize_block(block)
-                        print(f"Node {node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
-
-                    elif message.type == MessageType.ECHO_NOTARIZE:
-                        # Update the node’s view of notarized blocks based on an echo message
-                        block = message.content
-                        if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
-                            node.notarized_blocks[block.epoch] = block
-                            # Adicionar tx_id das transações notarizadas via Echo
-                            for tx_id in block.transactions.keys():
-                                node.notarized_tx_ids.add(tx_id)
-                                #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
-                            #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
-                            node.finalize_blocks()  # Re-check finalization criteria
-
-                    elif message.type == MessageType.ECHO_TRANSACTION:
-                        # Add echoed transaction to pending transactions if it’s new
-                        content = message.content
-                        transaction = content['transaction']
-                        epoch = content['epoch']
-                        #print(f"Echoed Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}, Epoch: {epoch}")
-                        node.add_transaction(transaction, epoch)
-                        #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
-
-                    if message.type == MessageType.SEED:
-                        seed = message.content
-                        if not node.is_alive():  # Check if the thread is already running
-                            node.set_seed(seed)
-                        else:
-                            print(f"Node {node_id}: Seed received but node is already running.")
-
-                    elif message.type == MessageType.DISPLAY_BLOCKCHAIN:
-                        node.display_blockchain()
 
     except Exception as e:
         print(f"Error in Node {node_id}: {e}")
