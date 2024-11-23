@@ -6,23 +6,36 @@ import os
 import time
 from message import Message
 
-def start_network(num_nodes, total_epochs, delta, base_port, start_time):
-    """
-    Launches each node as a separate process and waits for them to be ready.
-    """
-    ports = [base_port + i for i in range(num_nodes)]  # Generate a list of ports for nodes
 
-    # Start each node process in a new terminal
+def start_network(num_nodes, total_epochs, delta, base_port, start_time):
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    node_script_path = os.path.join(script_dir, 'node_script.py')
+
+    ports = [base_port + i for i in range(num_nodes)]
+
     for i in range(num_nodes):
         node_port = ports[i]
-        port_list = ",".join(map(str, ports))  # Ports to pass to each node
-        if sys.platform == "win32":
-            subprocess.Popen(
-                ["python", "node_script.py", str(i), str(num_nodes), str(total_epochs), str(delta), str(node_port), port_list, str(start_time)],
-                creationflags=subprocess.CREATE_NEW_CONSOLE
-            )
+        port_list = ",".join(map(str, ports))
+        cmd = ["python3", node_script_path, str(i), str(num_nodes), str(total_epochs), str(delta),
+               str(node_port), port_list, str(start_time)]
+        command = ' '.join(cmd)
+
+        if sys.platform == "darwin":  # macOS
+            subprocess.Popen([
+                'osascript', '-e',
+                f'tell application "Terminal" to do script "cd {script_dir} && {command}"'
+            ])
+        elif sys.platform == "win32":  # Windows
+            subprocess.Popen([
+                "cmd", "/c", f"start cmd /k cd {script_dir} && {command}"
+            ])
+        else:  # Linux and others
+            subprocess.Popen([
+                "gnome-terminal", "--", "bash", "-c", f"cd {script_dir} && {command}; exec bash"
+            ])
 
     print("All nodes are ready!")
+
 
 def main():
     # Set up argument parsing
@@ -43,6 +56,7 @@ def main():
 
     # Start the network
     start_network(num_nodes, total_epochs, delta, 5000, start_time)
+
 
 if __name__ == "__main__":
     main()

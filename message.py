@@ -48,9 +48,15 @@ class Message:
         elif isinstance(self.content, Transaction):
             content = self.content.to_dict()
         elif isinstance(self.content, dict):
-            content = self.content  
+            serialized_content = {}
+            for key, value in self.content.items():
+                if isinstance(value, Block) or isinstance(value, Transaction):
+                    serialized_content[key] = value.to_dict()
+                else:
+                    serialized_content[key] = value
+                content = serialized_content
         else:
-            content = self.content  
+            content = self.content
         
         return json.dumps({
             'type': self.type,
@@ -102,10 +108,15 @@ class Message:
                     epoch = content.get('epoch')
                     if transaction_data and epoch is not None:
                         transaction = Transaction.from_dict(transaction_data)
-                        content = {'transaction': transaction, 'epoch': epoch}
-                    else:
-                        print(f"Invalid transaction content: {content}")
-                        return None
+                        message_content = {'transaction': transaction, 'epoch': epoch}
+                        tx_id = transaction.tx_id
+                        if tx_id in blockchain_tx_ids:
+                            print(f"Transaction {tx_id} already included in blockchain. Ignoring.")
+                            return None
+                        if tx_id in notarized_tx_ids:
+                            print(f"Transaction {tx_id} already notarized. Ignoring.")
+                            return None
+                        return Message(msg_type, message_content, sender)
                 else:
                     print(f"Invalid content format for ECHO_TRANSACTION: {content}")
                     return None

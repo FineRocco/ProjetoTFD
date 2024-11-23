@@ -1,3 +1,5 @@
+# node.py
+
 from datetime import datetime, timedelta
 import threading
 import socket
@@ -19,24 +21,26 @@ class Node(threading.Thread):
         self.node_id = node_id
         self.total_nodes = total_nodes
         self.total_epochs = total_epochs
-        self.epoch_duration = 2 * delta
+        self.epoch_duration = 2 * delta 
         self.start_time = start_time
 
+        # Transaction and vote management
         self.tx_id_lock = threading.Lock()  # Lock to synchronize transaction ID generation
         self.global_tx_id = 0  # Global transaction counter
         self.pending_transactions = {}  
         self.vote_counts = {}  
         self.voted_senders = {} 
         self.notarized_tx_ids = set() 
+
         self.port = port
-        self.ports = ports  
-        print(f"Initialized Node {self.node_id} on port {self.port}") 
-        self.lock = threading.Lock()
+        self.ports = ports  # Use the already parsed list of ports
+
+        self.lock = threading.Lock() 
         self.current_epoch = 1  
-        self.blockchain = []  # Local chain of notarized blocks
-        self.notarized_blocks = {}
-        self.seed = None  # Store the seed here
-        self.running = False  # Flag to control the main loop
+        self.blockchain = []  
+        self.notarized_blocks = {} 
+        self.seed = None 
+        self.running = False 
 
         # Initialize notarized_blocks as a dictionary
         self.notarized_blocks = {}
@@ -46,63 +50,84 @@ class Node(threading.Thread):
         self.notarized_blocks[0] = self.genesis_block
         self.blockchain.append(self.genesis_block)
 
-    def initialize_sockets(self):
+        # Seed the random number generator once
+        random.seed(self.node_id + int(time.time()))
+
+        print(f"Initialized Node {self.node_id} on port {self.port}")
+
+    def next_leader(self):
         """
-        Initialize persistent outgoing sockets for all nodes.
+        Select the leader for the current epoch deterministically by rotating through the nodes.
         """
-        self.sockets = {}
-        # print(f"Node {self.node_id}: Initializing sockets. Current ports: {self.ports}")
+        current_leader = (self.current_epoch - 1) % self.total_nodes
+        print(f"Epoch {self.current_epoch}: Node {current_leader} is the leader.")
+        if current_leader == self.node_id:
+            self.propose_block(self.current_epoch)
+    
+    def set_seed(self, seed):
+        """
+        Sets the seed for the node. This can be used for consistent random operations if needed.
+        """
+        self.seed = seed
+                
+    def run(self):
+        """
+        Main loop for the consensus protocol.
+        """
+        print(f"Node {self.node_id}: Waiting for the time to start.")
 
-        # Connect to other nodes
-        for i, port in enumerate(self.ports):
-            if i == self.node_id:
-                continue  # Skip self connection
+        # Wait for the seed signal to start the protocol
+        start_datetime = self.calculate_start_datetime(self.start_time)
+        self.wait_for_start(start_datetime)
 
-            retries = 3
-            while retries > 0:
-                try:
-                    sock = socket.create_connection(('localhost', port), timeout=1)
-                    self.sockets[i] = sock
-                    print(f"Node {self.node_id}: Connected to Node {i} on port {port}. Socket: {sock}")
-                    # print(f"Node {self.node_id}: Sockets after connection: {self.sockets}")
-                    # print(f"Inside init, Node {self.node_id}: Socket for Node {i} has fileno: {sock.fileno()}")
-                    break  # Exit the retry loop on success
-                except (socket.timeout, ConnectionRefusedError):
-                    retries -= 1
-                    print(f"Node {self.node_id}: Failed to connect to Node {i} on port {port}. Retrying... ({3 - retries}/3)")
-                    time.sleep(1)  # Wait before retrying
-
-            if retries == 0:
-                print(f"Node {self.node_id}: Could not connect to Node {i} on port {port} after 3 attempts.")
-
-
-        print(f"Node {self.node_id}: Final state of sockets after initialization: {self.sockets}")
+        if not self.seed:
+            print(f"Node {self.node_id}: Seed not set. Exiting run method.")
+            return
+        
+        for epoch in range(1, self.total_epochs + 1):
+            self.current_epoch = epoch
+            print(f"=== Epoch {epoch} ===")
+            self.next_leader()
+            self.generate_transactions_for_epoch(epoch)
+            time.sleep(self.epoch_duration)
+            
+        self.display_blockchain()
 
     def broadcast_message(self, message):
-        """
-        Broadcast a serialized message to all connected nodes using persistent sockets.
-        """
-        serialized_message = message.serialize()
-        # print(f"Node {self.node_id}: Starting broadcast. Current sockets: {self.sockets}")
-
-        for target_node_id, sock in self.sockets.items():
+            """
+            Broadcast a serialized message to all other nodes by establishing new connections.
+            Retry sending indefinitely in a non-blocking manner using threads.
+            """
             try:
-                # print(f"Inside boradcat, Node {self.node_id}: Socket has fileno: {sock.fileno()}")
-                # print(f"Node {self.node_id}: Broadcasting to Node {target_node_id} using socket {sock}.")
-                print(f"Inicial state of broadcast.{self.sockets}")
-                sock.sendall(serialized_message)
-                print(f"Node {self.node_id}: Successfully broadcasted to Node {target_node_id}.")
-            except (socket.error, ConnectionResetError):
-                print(f"Node {self.node_id}: Failed to send message to Node {target_node_id}.")
+                serialized_message = message.serialize()
+                print(f"Node {self.node_id}: Broadcasting message of type {message.type} to all nodes.")
             except Exception as e:
-                print(f"Node {self.node_id}: Error while broadcasting to Node {target_node_id}: {e}")
+                print(f"Node {self.node_id}: Failed to serialize message - {e}")
+                return
 
-        print(f"Node {self.node_id}: Broadcast completed.")
+            for target_node_id, port in enumerate(self.ports):
+                if target_node_id == self.node_id:
+                    continue  # Skip sending to self
 
+                def send_to_node():
+                    while True:
+                        try:
+                            with socket.create_connection(('localhost', port), timeout=1) as sock:
+                                sock.sendall(serialized_message)
+                                print(f"Node {self.node_id}: Successfully sent message to Node {target_node_id} on port {port}.")
+                            break  # Exit loop on success
+                        except ConnectionRefusedError:
+                            print(f"Node {self.node_id}: Connection refused by Node {target_node_id} on port {port}. Retrying...")
+                            break
+                        except Exception as e:
+                            print(f"Node {self.node_id}: Error sending message to Node {target_node_id} on port {port} - {e}")
+                            break  
+                threading.Thread(target=send_to_node, daemon=True).start()
 
     def handle_incoming_messages(self, listening_socket):
         """
         Listen for and process incoming messages using the provided listening socket.
+        Validate the sender based on their Node ID in the message.
         """
         try:
             print(f"Node {self.node_id}: Listening for incoming messages...")
@@ -114,23 +139,30 @@ class Node(threading.Thread):
                         blockchain_tx_ids = {tx_id for block in self.blockchain for tx_id in block.transactions.keys()}
                         notarized_tx_ids = self.notarized_tx_ids
 
+                        # Deserialize the message
                         message = Message.deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids)
                         if message is None:
                             print(f"Node {self.node_id}: Deserialization failed. Ignoring message.")
                             continue
 
-                        print(f"Node {self.node_id}: Received message of type {message.type}")
+                        # Validate sender Node ID
+                        if message.sender not in range(self.total_nodes):
+                            print(f"Node {self.node_id}: Invalid sender Node ID {message.sender}. Closing connection.")
+                            continue
+
+                        print(f"Node {self.node_id}: Received message of type {message.type} from Node {message.sender}")
 
                         # Process the message
                         self.process_message(message)
                 except Exception as e:
                     print(f"Node {self.node_id}: Error in message handling - {e}")
-
         except Exception as e:
-            print(f"Node {self.node_id}: Error in message handling - {e}")
+            print(f"Node {self.node_id}: Critical error in message handling - {e}")
 
     def process_message(self, message):
-        # Handle various message types
+        """
+        Handle various message types.
+        """
         if message.type == MessageType.PROPOSE:
             # Vote on the received proposed block
             block = message.content
@@ -169,11 +201,9 @@ class Node(threading.Thread):
             block = message.content
             if block.epoch not in self.notarized_blocks or self.notarized_blocks[block.epoch].hash != block.hash:
                 self.notarized_blocks[block.epoch] = block
-                # Adicionar tx_id das transações notarizadas via Echo
+                # Add tx_id of notarized transactions via Echo
                 for tx_id in block.transactions.keys():
                     self.notarized_tx_ids.add(tx_id)
-                    #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
-                #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
                 self.finalize_blocks()  # Re-check finalization criteria
 
         elif message.type == MessageType.ECHO_TRANSACTION:
@@ -181,27 +211,29 @@ class Node(threading.Thread):
             content = message.content
             transaction = content['transaction']
             epoch = content['epoch']
-            #print(f"Echoed Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}, Epoch: {epoch}")
             self.add_transaction(transaction, epoch)
-            #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
 
         elif message.type == MessageType.DISPLAY_BLOCKCHAIN:
             self.display_blockchain()
 
     def calculate_start_datetime(self, start_time):
-        """Calculate the start datetime from a 24-hour time string."""
+        """
+        Calculate the start datetime based on the provided start_time string in HH:MM format.
+        """
         now = datetime.now()
         start_hour, start_minute = map(int, start_time.split(":"))
         start_datetime = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
         
-        # If the start time is in the past, schedule it for the next day
+        # If the start time is in the past, do not wait and start immediately
         if start_datetime < now:
-            start_datetime += timedelta(days=1)
+            start_datetime = now  # Start now
         
         return start_datetime
 
     def wait_for_start(self, start_datetime):
-        """Wait until the specified start datetime."""
+        """
+        Wait until the specified start_datetime.
+        """
         now = datetime.now()
         wait_seconds = (start_datetime - now).total_seconds()
         if wait_seconds > 0:
@@ -210,40 +242,6 @@ class Node(threading.Thread):
         else:
             print(f"Start time {start_datetime} is now or has passed. Starting immediately.")
 
-    def next_leader(self, seed):
-        random.seed(seed)
-        current_leader = random.randint(0, self.total_nodes - 1)
-        #TDOD Check if chosen leader is alive, if not choose another one.
-        if (current_leader == self.node_id):
-            self.propose_block(self.current_epoch)
-
-    def set_seed(self, seed, sock):
-        """Sets the seed and starts the consensus protocol."""
-        print(f"Socket fileno: {sock.fileno()} (should be >= 0 if open)")
-        self.seed = seed
-
-    def run(self):
-        """
-        Main loop for the consensus protocol.
-        """
-        print(f"Node {self.node_id}: Waiting for the time to start.")
-
-        # Wait for the seed signal to start the protocol
-        start_datetime = self.calculate_start_datetime(self.start_time)
-        self.wait_for_start(start_datetime)
-    
-        if not self.seed:
-            print(f"Node {self.node_id}: Seed not set. Exiting run method.")
-            return
-        
-        for epoch in range(1, self.total_epochs + 1):
-            self.current_epoch=epoch
-            print(f"=== Epoch {epoch} ===")
-            self.next_leader(self.seed)
-            self.generate_transactions_for_epoch(epoch)
-            time.sleep(self.epoch_duration)
-            
-        self.display_blockchain()
 
     def propose_block(self, epoch):
         """
@@ -275,13 +273,11 @@ class Node(threading.Thread):
     def vote_on_block(self, block):
         """
         Votes on a proposed block if it extends the longest notarized chain.
-
-        :param block: Block - The proposed block.
         """
         print(f"Node {self.node_id}: Preparing to vote on Block {block.hash.hex()} with transactions: {list(block.transactions.keys())}")
         longest_notarized_block = self.get_longest_notarized_chain()
         if longest_notarized_block and block.epoch <= longest_notarized_block.epoch:
-            print(f"Node {self.node_id}: Ignorando votação para Block {block.hash.hex()} em epoch {block.epoch} (epoch <= {longest_notarized_block.epoch})")
+            print(f"Node {self.node_id}: Ignoring vote for Block {block.hash.hex()} in epoch {block.epoch} (epoch <= {longest_notarized_block.epoch})")
             return  
 
         with self.lock:
@@ -298,7 +294,7 @@ class Node(threading.Thread):
                 self.voted_senders[block_hash].add(self.node_id)
                 print(f"Node {self.node_id} voted for Block {block_hash} in epoch {block.epoch}")
             else:
-                print(f"Node {self.node_id} já votou para Block {block_hash} em epoch {block.epoch}")
+                print(f"Node {self.node_id} has already voted for Block {block_hash} in epoch {block.epoch}")
                 return
 
         # Broadcast vote to all nodes
@@ -311,8 +307,6 @@ class Node(threading.Thread):
     def notarize_block(self, block):
         """
         Notarizes a block if it receives more than n/2 votes, and notifies other nodes.
-
-        :param block: Block - The block to notarize.
         """
         with self.lock:
             block_hash = block.hash.hex()
@@ -320,7 +314,7 @@ class Node(threading.Thread):
 
             # Check if this block is already notarized
             if block.epoch in self.notarized_blocks and self.notarized_blocks[block.epoch].hash == block.hash:
-                print(f"Block {block_hash} has already been notarized in epoch {block.epoch}")
+                print(f"Node {self.node_id}: Block {block_hash} has already been notarized in epoch {block.epoch}")
                 return
 
             # Check if vote count meets quorum
@@ -330,7 +324,6 @@ class Node(threading.Thread):
 
                 for tx_id in block.transactions.keys():
                     self.notarized_tx_ids.add(tx_id)
-                    #print(f"Node {self.node_id}: Transaction {tx_id} added to notarized_tx_ids.")
 
                 # Broadcast notarization to all nodes
                 echo_message = Message.create_echo_notarize_message(block, self.node_id)
@@ -338,35 +331,34 @@ class Node(threading.Thread):
                 self.finalize_blocks()
 
     def finalize_blocks(self):
+        """
+        Finalizes blocks that have been notarized for three consecutive epochs.
+        """
         print(f"Node {self.node_id}: Checking for finalization. Current blockchain: {[(b.epoch, list(b.transactions.keys())) for b in self.blockchain]}")
         notarized_epochs = sorted(self.notarized_blocks.keys())
         print(f"Node {self.node_id}: Notarized epochs: {notarized_epochs}")
         
         for i in range(2, len(notarized_epochs)):
-            # Check for three consecutive epochs
             if (notarized_epochs[i] == notarized_epochs[i - 1] + 1 and
                 notarized_epochs[i - 1] == notarized_epochs[i - 2] + 1):
                 
-                # Finalize the second block in this sequence of three consecutive epochs
                 second_epoch = notarized_epochs[i - 1]
                 finalized_block = self.notarized_blocks[second_epoch]
                 
-                # Ensure the block and its chain are not already in the blockchain
                 if finalized_block not in self.blockchain:
                     print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
-                    
-                    # Add the finalized block and its entire parent chain to the blockchain
                     chain = self.get_chain_to_block(finalized_block)
-                    
-                    # Print details of each block in the chain for debugging
-                    print(f"Node {self.node_id}: Finalized chain to add:")
                     for b in chain:
-                        print(f"  Block {b.epoch}: Hash {b.hash.hex()}, Previous Hash {b.previous_hash.hex()}, Transactions: {list(b.transactions.keys())}")
-
+                        print(f"Finalizing Block {b.epoch}: Hash {b.hash.hex()}, Previous Hash {b.previous_hash.hex()}")
                     self.blockchain.extend(chain)
-                    print(f"Node {self.node_id}: Extended blockchain with chain ending in epoch {second_epoch}")
-        
+
     def get_chain_to_block(self, block):
+        """
+        Retrieves the chain of blocks leading up to the specified block.
+
+        :param block: Block - The block to trace back to the genesis block.
+        :return: List[Block] - The list of blocks to add to the blockchain.
+        """
         chain = []
         current_block = block
         while current_block and current_block not in self.blockchain:
@@ -381,8 +373,12 @@ class Node(threading.Thread):
                 print(f"Node {self.node_id}: Reached end of chain or genesis block.")
         return chain
 
-
     def get_longest_notarized_chain(self):
+        """
+        Retrieves the latest notarized block based on epoch.
+
+        :return: Block or None - The latest notarized block.
+        """
         with self.lock:
             if not self.notarized_blocks:
                 return None  
@@ -390,10 +386,14 @@ class Node(threading.Thread):
             return self.notarized_blocks[latest_epoch]
 
     def add_transaction(self, transaction, epoch):
+        """
+        Adds a transaction to the pending transactions for the next epoch.
+
+        :param transaction: Transaction - The transaction to add.
+        :param epoch: int - The epoch from which the transaction is echoed.
+        """
         with self.lock:
             next_epoch = epoch + 1
-            #print(f"Node {self.node_id}: Adding transaction {transaction.tx_id} to pending transactions for epoch {next_epoch}")
-            #print(f"Node {self.node_id}: Current pending transactions before add: {self.pending_transactions}")
 
             # Ensure the next epoch entry is initialized if it doesn't exist
             if next_epoch not in self.pending_transactions:
@@ -402,22 +402,18 @@ class Node(threading.Thread):
             # Check if the transaction already exists in the blockchain or is notarized
             for block in self.blockchain:
                 if transaction.tx_id in block.transactions:
-                    #print(f"Node {self.node_id}: Transaction {transaction.tx_id} already included in blockchain. Ignoring.")
                     return
 
             if transaction.tx_id in self.notarized_tx_ids:
-                #print(f"Node {self.node_id}: Transaction {transaction.tx_id} already notarized. Ignoring.")
                 return
 
             # Avoid adding the transaction if it's already in the pending list
             for txs in self.pending_transactions.values():
                 if any(tx.tx_id == transaction.tx_id for tx in txs):
-                    #print(f"Node {self.node_id}: Transaction {transaction.tx_id} already exists in pending transactions. Ignoring.")
                     return
 
             # Add the transaction to the pending list for the next epoch
             self.pending_transactions[next_epoch].append(transaction)
-            #print(f"Node {self.node_id} added transaction {transaction.tx_id} to pending transactions for epoch {next_epoch}.")
 
     def get_next_tx_id(self):
         """
@@ -431,24 +427,20 @@ class Node(threading.Thread):
 
     def generate_random_transaction_for_epoch(self, epoch):
         """
-        Creates a random transaction and sends it to a randomly selected node in the network for a specific epoch.
-
-        :param epoch: int - The epoch to which the transaction belongs.
+        Creates a random transaction and sends it to the network.
         """
         sender = f"Client{random.randint(1, 100)}"
         receiver = f"Client{random.randint(1, 100)}"
         amount = random.randint(1, 1000)
 
-        # Generate a unique transaction ID
         tx_id = self.get_next_tx_id()
         transaction = Transaction(tx_id, sender, receiver, amount)
 
-        # Send transaction to a random node
-        target_id = random.randint(0, self.total_nodes-1)
+        target_id = random.randint(0, self.total_nodes - 1)
         if target_id == self.node_id:
             self.add_transaction(transaction, self.current_epoch)
-            echo_message = Message.create_echo_transaction_message(transaction, epoch, self.node_id)
-            self.broadcast_message(echo_message)
+        echo_message = Message.create_echo_transaction_message(transaction, epoch, self.node_id)
+        self.broadcast_message(echo_message)
 
     def generate_transactions_for_epoch(self, epoch):
         """
@@ -461,6 +453,9 @@ class Node(threading.Thread):
             self.generate_random_transaction_for_epoch(epoch)
 
     def display_blockchain(self):
+        """
+        Displays the current state of the blockchain.
+        """
         if not self.blockchain:
             print(f"Node {self.node_id}: Blockchain is empty.")
             return
@@ -475,4 +470,4 @@ class Node(threading.Thread):
             
             for tx_id, tx in block.transactions.items():  # Unpack tx_id and Transaction object
                 print(f"    Transaction {tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
-            print("-" * 40)  # Separator for each block
+            print("-" * 40) 
