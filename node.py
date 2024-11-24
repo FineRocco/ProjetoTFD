@@ -35,7 +35,7 @@ class Node(threading.Thread):
         self.running = True
         self.lock = threading.Lock()
         self.current_epoch = 1  
-        self.blockchain = []  # Local chain of notarized blocks
+        self.blockchain = []  # Local chain of finalized blocks
         self.notarized_blocks = {}
         self.seed = None  # Store the seed here
 
@@ -52,8 +52,8 @@ class Node(threading.Thread):
         self.message_queue = Queue()
 
         # Confusion period parameters
-        self.confusion_start = 2  # Example value; can be parameterized
-        self.confusion_duration = 2  # Example value; can be parameterized
+        self.confusion_start = 2  # Adjust as needed
+        self.confusion_duration = 2  # Adjust as needed
 
     def set_seed(self, seed):
         """Sets the seed and starts the consensus protocol."""
@@ -63,8 +63,7 @@ class Node(threading.Thread):
 
     def get_leader(self, epoch):
         """
-        Determines the leader for a given epoch.
-        Implements confusion period logic to create forks.
+        Determines the leader for a given epoch, implementing confusion period logic.
 
         :param epoch: int - The current epoch.
         :return: int - The node ID of the leader for the epoch.
@@ -74,11 +73,6 @@ class Node(threading.Thread):
             return random.randint(0, self.total_nodes - 1)
         else:
             return epoch % self.total_nodes
-
-    def next_leader(self):
-        current_leader = self.get_leader(self.current_epoch)
-        if current_leader == self.node_id:
-            self.propose_block(self.current_epoch)
 
     def run(self):
         # Wait for the seed signal to start the protocol
@@ -92,18 +86,36 @@ class Node(threading.Thread):
         for epoch in range(1, self.total_epochs + 1):
             self.current_epoch = epoch
             print(f"=== Epoch {epoch} ===")
-            self.next_leader()
             self.generate_transactions_for_epoch(epoch)
 
-            # Process messages if not in confusion period
-            if self.current_epoch < self.confusion_start or self.current_epoch >= self.confusion_start + self.confusion_duration - 1:
-                while not self.message_queue.empty():
-                    msg = self.message_queue.get()
-                    self.process_message(msg)
+            leader_id = self.get_leader(epoch)
+            if self.node_id == leader_id:
+                self.propose_block(epoch)
             else:
-                print(f"Node {self.node_id}: Skipping message processing during confusion period.")
+                # Wait for a proposal from the leader
+                proposal_received = False
+                wait_time = 0
+                while wait_time < self.epoch_duration:
+                    time.sleep(1)
+                    wait_time += 1
+                    with self.lock:
+                        if any(msg.type == MessageType.PROPOSE and msg.content.epoch == epoch for msg in list(self.message_queue.queue)):
+                            proposal_received = True
+                            break
+                    if proposal_received:
+                        break
+                if not proposal_received:
+                    # Backup leader steps up
+                    if self.node_id == (leader_id + 1) % self.total_nodes:
+                        print(f"Node {self.node_id}: No proposal received for epoch {epoch}. Acting as backup leader.")
+                        self.propose_block(epoch)
 
-            time.sleep(self.epoch_duration)
+            # Process messages
+            while not self.message_queue.empty():
+                msg = self.message_queue.get()
+                self.process_message(msg)
+
+            time.sleep(self.epoch_duration - wait_time)
         self.display_blockchain()
 
     def calculate_start_datetime(self, start_time):
@@ -141,7 +153,7 @@ class Node(threading.Thread):
             return None
 
         # Retrieve the latest block in the notarized chain
-        previous_block = self.get_longest_notarized_chain()
+        previous_block = self.get_longest_notarized_chain()[-1]
         previous_hash = previous_block.hash if previous_block else b'0' * 20
         length = previous_block.length + 1 if previous_block else 1
 
@@ -167,7 +179,8 @@ class Node(threading.Thread):
         :param block: Block - The proposed block.
         """
         print(f"Node {self.node_id}: Preparing to vote on Block {block.hash.hex()} with transactions: {list(block.transactions.keys())}")
-        longest_notarized_block = self.get_longest_notarized_chain()
+        longest_notarized_chain = self.get_longest_notarized_chain()
+        longest_notarized_block = longest_notarized_chain[-1] if longest_notarized_chain else None
         if longest_notarized_block and block.length <= longest_notarized_block.length:
             print(f"Node {self.node_id}: Ignoring vote for Block {block.hash.hex()} in epoch {block.epoch} (length <= {longest_notarized_block.length})")
             return  
@@ -225,44 +238,34 @@ class Node(threading.Thread):
                 self.finalize_blocks()
 
     def finalize_blocks(self):
-        print(f"Node {self.node_id}: Checking for finalization. Current blockchain: {[(b.epoch, list(b.transactions.keys())) for b in self.blockchain]}")
-        notarized_epochs = sorted(self.notarized_blocks.keys())
-        print(f"Node {self.node_id}: Notarized epochs: {notarized_epochs}")
-        
-        for i in range(2, len(notarized_epochs)):
-            # Check for three consecutive epochs
-            if (notarized_epochs[i] == notarized_epochs[i - 1] + 1 and
-                notarized_epochs[i - 1] == notarized_epochs[i - 2] + 1):
-                
-                # Finalize the second block in this sequence of three consecutive epochs
-                second_epoch = notarized_epochs[i - 1]
-                finalized_block = self.notarized_blocks[second_epoch]
-                
-                # Ensure the block and its chain are not already in the blockchain
-                if finalized_block not in self.blockchain:
-                    print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
-                    
-                    # Add the finalized block and its entire parent chain to the blockchain
-                    chain = self.get_chain_to_block(finalized_block)
-                    
-                    self.blockchain.extend(chain)
-                    print(f"Node {self.node_id}: Extended blockchain with chain ending in epoch {second_epoch}")
-        
-    def get_chain_to_block(self, block):
-        chain = []
-        current_block = block
-        while current_block and current_block not in self.blockchain:
-            chain.insert(0, current_block)
-            current_block = self.notarized_blocks.get(current_block.epoch - 1)
-        return chain
+        print(f"Node {self.node_id}: Checking for finalization. Current blockchain epochs: {[b.epoch for b in self.blockchain]}")
+        # Build the chain of notarized blocks starting from the longest chain
+        chain = self.get_longest_notarized_chain()
+        print(f"Node {self.node_id}: Notarized chain epochs: {[block.epoch for block in chain]}")
+
+        for i in range(len(chain) - 2):
+            block_a = chain[i]
+            block_b = chain[i + 1]
+            block_c = chain[i + 2]
+
+            # Since the chain is built from previous_hash, blocks form a valid chain
+            # Finalize block_a if not already in the blockchain
+            if block_a not in self.blockchain:
+                print(f"Node {self.node_id}: Finalizing Block {block_a.hash.hex()} in epoch {block_a.epoch}")
+                self.blockchain.append(block_a)
 
     def get_longest_notarized_chain(self):
         with self.lock:
             if not self.notarized_blocks:
-                return None
-            # Find the block with maximum length
+                return []
+            # Start from the block with the highest length
             longest_block = max(self.notarized_blocks.values(), key=lambda b: b.length)
-            return longest_block
+            chain = []
+            current_block = longest_block
+            while current_block:
+                chain.insert(0, current_block)
+                current_block = self.notarized_blocks.get(current_block.epoch - 1)
+            return chain
 
     def add_transaction(self, transaction, epoch):
         with self.lock:
@@ -312,12 +315,10 @@ class Node(threading.Thread):
         tx_id = self.get_next_tx_id()
         transaction = Transaction(tx_id, sender, receiver, amount)
 
-        # Send transaction to a random node
-        target_id = random.randint(0, self.total_nodes - 1)
-        if target_id == self.node_id:
-            self.add_transaction(transaction, self.current_epoch)
-            echo_message = Message.create_echo_transaction_message(transaction, epoch, self.node_id)
-            self.broadcast_message(echo_message)
+        # Send transaction to self
+        self.add_transaction(transaction, self.current_epoch)
+        echo_message = Message.create_echo_transaction_message(transaction, epoch, self.node_id)
+        self.broadcast_message(echo_message)
 
     def generate_transactions_for_epoch(self, epoch):
         """

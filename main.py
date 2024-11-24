@@ -8,7 +8,7 @@ def start_network(num_nodes, total_epochs, delta, base_port, start_time):
     """
     ports = [base_port + i for i in range(num_nodes)]  # Generate a list of ports for nodes
 
-    # Start each node process in a new terminal
+    # Start each node process
     for i in range(num_nodes):
         node_port = ports[i]
         port_list = ",".join(map(str, ports))  # Ports to pass to each node
