@@ -82,52 +82,25 @@ O código foi cuidadosamente revisado para garantir conformidade com os requisit
 
 # Alterações relativamente ao DenisBranch (24/11)
 
-## Seleção de Líderes
+## Lidando com falhas de liderança em node.py:
 
-Líder determinístico com base na época : o líder para cada época é escolhido deterministicamente com base no número da época, garantindo consistência entre os nós.
-Implementação do Período de Confusão : Durante o período de confusão definido, a lógica de seleção do líder é alterada para criar bifurcações intencionalmente. Isso simula partições ou atrasos de rede, permitindo que você demonstre a capacidade do protocolo de lidar com bifurcações e convergência eventual.
+Modificou o runmétodo para incluir um mecanismo de timeout. Os nós esperam por uma proposta do líder pela duração de epoch_duration. Se nenhuma proposta for recebida, o próximo nó na fila atua como um líder de backup.
+Ajustou o get_leadermétodo para implementar a lógica do período de confusão conforme os requisitos do projeto, criando bifurcações durante épocas específicas.
+Durante o período de confusão, o líder está determinado de forma diferente a criar bifurcações.
 
-## Manipulação do comprimento do bloco
+## Processamento de mensagens durante o período de confusão:
 
-Cada bloco inclui um lengthatributo que representa o comprimento da cadeia até aquele bloco.
-Os nós consideram o comprimento do bloco ao decidir se votam em um bloco proposto, votando apenas em blocos que estendem a maior cadeia autenticada que eles já viram até agora.
+Garantiu que o processamento de mensagens continuasse durante o período de confusão, mas fosse tratado de uma forma que permitisse a ocorrência de bifurcações.
+Ajustou o loop de processamento de mensagens para sempre processar mensagens, mas controlar a seleção do líder para criar a confusão desejada.
 
-## Mecanismo de eco (transmissão uniforme e confiável)
+## Avanço de Época:
 
-Os nós implementam um mecanismo de eco para garantir o Uniform Reliable Broadcast (URB). Ao receber uma mensagem, os nós verificam se já a processaram usando um seen_messagesconjunto.
-Se a mensagem for nova, eles a processam e transmitem para todos os outros nós, garantindo que cada mensagem seja entregue de forma confiável a todos os nós exatamente uma vez.
+Os nós avançam épocas independentemente com base no for-loop no runmétodo. Isso impede que os nós esperem indefinidamente por mensagens de nós travados.
+Ao permitir que os líderes de backup intervenham, os nós podem continuar a processar e finalizar blocos mesmo quando alguns nós falham.
 
-## Geração e tratamento de transações
+## Lógica de Finalização:
 
-Os nós geram transações aleatórias e as transmitem para outros nós.
-As transações são incluídas nos blocos propostos pelo líder para a época atual.
-O código garante que cada transação seja incluída apenas uma vez no blockchain, evitando duplicatas.
-
-## Notarização e Finalização
-
-Um bloco é autenticado quando recebe votos de mais de n/2nós distintos.
-A regra de finalização é implementada: se um nó observa três blocos autenticados consecutivos com números de época consecutivos, ele finaliza o segundo bloco e toda a sua cadeia pai.
-Os blocos finalizados são adicionados ao blockchain local do nó.
-
-## Manuseio e convergência de garfos
-
-O período de confusão cria bifurcações porque os nós ignoram o processamento de mensagens durante determinados períodos.
-Após o período de confusão, os nós retomam a operação normal, e o protocolo garante que o blockchain converge de volta para uma única cadeia por meio da regra de finalização.
-Tolerância a falhas :
-
-A implementação foi projetada para lidar com falhas e recuperações de nós.
-Ele pode lidar com mensagens atrasadas e nós perdendo épocas, atendendo aos requisitos de tolerância a falhas.
-
-## Conformidade com as especificações do protocolo :
-
-O código segue de perto o protocolo Streamlet, conforme descrito no artigo referenciado, particularmente a versão tolerante a falhas de travamento na Seção 5.
-Todas as estruturas de dados, como Transaction, Block, e Message, são implementadas com os campos e funcionalidades necessários.
-
-## Características adicionais :
-
-O código é estruturado para permitir fácil modificação e extensão.
-Instruções de registro são incluídas para rastrear o fluxo de execução e observar o comportamento do protocolo durante a operação.
-Dadas essas implementações, posso confirmar que o código atende a todos os requisitos especificados e deve funcionar corretamente conforme o algoritmo de consenso do Streamlet. Ele simula efetivamente um livro-razão distribuído tolerante a falhas, demonstra o manuseio de forks e mostra como o blockchain converge de volta para uma única cadeia após interrupções.
+O finalize_blocksmétodo permanece consistente, finalizando um bloco quando ele é seguido por mais dois blocos autenticados na cadeia, independentemente de lacunas de época causadas por nós travados.
 
 ---
 
