@@ -1,6 +1,9 @@
+from datetime import datetime, timedelta
 import random
 import socket
 import sys
+import threading
+import time
 from message import Message, MessageType
 from node import Node
 from transaction import Transaction
@@ -14,12 +17,12 @@ def main():
     Based on the received message type, the node performs actions like proposing blocks,
     voting, notarizing, and displaying the blockchain.
 
-    Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports>
+    Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>
     """
     
     # Verify command-line arguments
-    if len(sys.argv) < 7:
-        print("Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports>")
+    if len(sys.argv) < 8:
+        print("Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>")
         input("Press Enter to exit...")  # Keeps the window open if arguments are missing
         sys.exit(1)
 
@@ -31,23 +34,15 @@ def main():
         delta = int(sys.argv[4])
         port = int(sys.argv[5])
         ports = list(map(int, sys.argv[6].split(',')))  # List of network ports
+        start_time = sys.argv[7]  # Start time in HH:MM format
 
         print(f"Starting Node {node_id} with total_nodes={total_nodes}, port={port}")
 
         # Initialize the Node
-        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports)
+        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time)
+        node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
 
-        # Signal readiness to the StreamletNetwork process
-        try:
-            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ready_socket:
-                ready_socket.connect(('localhost', 6000))  # Port for readiness signaling
-                ready_socket.sendall(b"READY")
-            print(f"Node {node_id} sent READY signal.")
-        except ConnectionRefusedError:
-            print(f"Error: Could not connect to readiness port 6000 for Node {node_id}")
-        except Exception as e:
-            print(f"Unexpected error in readiness signaling for Node {node_id}: {e}")
-
+        
         # Start listening for commands on the designated port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -126,15 +121,6 @@ def main():
                         node.add_transaction(transaction, epoch)
                         #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
 
-                    if message.type == MessageType.SEED:
-                        seed = message.content
-                        if not node.is_alive():  # Check if the thread is already running
-                            node.set_seed(seed)
-                        else:
-                            print(f"Node {node_id}: Seed received but node is already running.")
-
-                    elif message.type == MessageType.DISPLAY_BLOCKCHAIN:
-                        node.display_blockchain()
 
     except Exception as e:
         print(f"Error in Node {node_id}: {e}")

@@ -1,3 +1,4 @@
+from datetime import datetime
 import threading
 import socket
 import time
@@ -13,12 +14,13 @@ class Node(threading.Thread):
     Represents a blockchain node in a network running the Streamlet consensus protocol.
     Each node can propose, vote, and notarize blocks, and broadcasts messages to other nodes.
     """
-    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports):
+    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports, start_time):
         super().__init__()
         self.node_id = node_id
         self.total_nodes = total_nodes
         self.total_epochs = total_epochs
         self.epoch_duration = 2 * delta
+        self.start_time = start_time
 
         self.tx_id_lock = threading.Lock()  # Lock to synchronize transaction ID generation
         self.global_tx_id = 0  # Global transaction counter
@@ -59,6 +61,10 @@ class Node(threading.Thread):
         self.start()  # Start the thread, which calls run()
 
     def run(self):
+        # Wait for the seed signal to start the protocol
+        start_datetime = self.calculate_start_datetime(self.start_time)
+        self.wait_for_start(start_datetime)
+
         if not self.seed:
             print(f"Node {self.node_id}: Seed not set. Exiting run method.")
             return
@@ -70,6 +76,32 @@ class Node(threading.Thread):
             self.generate_transactions_for_epoch(epoch)
             time.sleep(self.epoch_duration)
         self.display_blockchain()
+
+    def calculate_start_datetime(self, start_time):
+        """
+        Calculate the start datetime based on the provided start_time string in HH:MM format.
+        """
+        now = datetime.now()
+        start_hour, start_minute = map(int, start_time.split(":"))
+        start_datetime = now.replace(hour=start_hour, minute=start_minute, second=0, microsecond=0)
+        
+        # If the start time is in the past, do not wait and start immediately
+        if start_datetime < now:
+            start_datetime = now  # Start now
+        
+        return start_datetime
+
+    def wait_for_start(self, start_datetime):
+        """
+        Wait until the specified start_datetime.
+        """
+        now = datetime.now()
+        wait_seconds = (start_datetime - now).total_seconds()
+        if wait_seconds > 0:
+            print(f"Waiting for {int(wait_seconds)} seconds until start time {start_datetime}.")
+            time.sleep(wait_seconds)
+        else:
+            print(f"Start time {start_datetime} is now or has passed. Starting immediately.")
 
     def propose_block(self, epoch):
         """
