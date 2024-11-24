@@ -1,4 +1,5 @@
 import json
+import hashlib
 from block import Block
 from transaction import Transaction
 
@@ -6,13 +7,12 @@ class MessageType:
     """
     Defines constants for the various message types exchanged between nodes in the network.
     """
-    START_PROPOSAL = "START_PROPOSAL"
     PROPOSE = "PROPOSE"
     VOTE = "VOTE"
     ECHO_NOTARIZE = "ECHO_NOTARIZE"
-    TRANSACTION = "TRANSACTION"
     ECHO_TRANSACTION = "ECHO_TRANSACTION"
     DISPLAY_BLOCKCHAIN = "DISPLAY_BLOCKCHAIN"
+    SEED = "SEED"
 
 class Message:
     """
@@ -36,7 +36,7 @@ class Message:
         self.type = message_type
         self.content = content    
         self.sender = sender      
-    
+
     def serialize(self):
         """
         Serializes the message to bytes for network transmission.
@@ -60,74 +60,64 @@ class Message:
         }).encode('utf-8')
     
     @staticmethod
-    def deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids):
+    def deserialize(data):
         """
-        Deserializes a message received from a socket.
+        Deserializes a message from bytes.
 
         Parameters:
-        - conn (socket): The socket connection from which data is received.
-        - blockchain_tx_ids (set): Set of transaction IDs already included in the blockchain.
-        - notarized_tx_ids (set): Set of transaction IDs already notarized.
+        - data (bytes): The serialized message data.
 
         Returns:
         - Message: A Message object or None if deserialization fails.
         """
         try:
-            data = conn.recv(4096)  
-            if not data:
-                print("No data received from socket.")
-                return None
             obj = json.loads(data.decode('utf-8'))
-            msg_type = obj['type']
-            content = obj['content']
+            msg_type = obj.get('type')
+            content = obj.get('content')
             sender = obj.get('sender', None)
-    
+
+            if not msg_type:
+                print("Message type missing or invalid.")
+                return None
+
+            # Handle specific message types
             if msg_type in [MessageType.PROPOSE, MessageType.ECHO_NOTARIZE, MessageType.VOTE]:
-                content = Block.from_dict(content)
-            elif msg_type in [MessageType.TRANSACTION, MessageType.ECHO_TRANSACTION]:
-                transaction_data = content.get('transaction')
-                epoch = content.get('epoch')
-                transaction = Transaction.from_dict(transaction_data)
-                content = {'transaction': transaction, 'epoch': epoch}
-            elif msg_type == MessageType.START_PROPOSAL:
-                content = int(content)
+                if isinstance(content, dict):
+                    content = Block.from_dict(content)
+                else:
+                    print(f"Invalid block content: {content}")
+                    return None
+            elif msg_type == MessageType.ECHO_TRANSACTION:
+                if isinstance(content, dict):
+                    transaction_data = content.get('transaction')
+                    epoch = content.get('epoch')
+                    if transaction_data and epoch is not None:
+                        transaction = Transaction.from_dict(transaction_data)
+                        content = {'transaction': transaction.to_dict(), 'epoch': epoch}
+                    else:
+                        print(f"Invalid transaction content: {content}")
+                        return None
+                else:
+                    print(f"Invalid content format for ECHO_TRANSACTION: {content}")
+                    return None
+            elif msg_type == MessageType.SEED:
+                if not isinstance(content, str):
+                    print(f"Invalid SEED content: {content}")
+                    return None
             elif msg_type == MessageType.DISPLAY_BLOCKCHAIN:
-                content = None  
+                content = None
             else:
                 print(f"Unknown message type: {msg_type}")
                 return None
-    
-            if msg_type in [MessageType.TRANSACTION, MessageType.ECHO_TRANSACTION]:
-                tx_id = content['transaction'].tx_id
-                if tx_id in blockchain_tx_ids:
-                    print(f"Transaction {tx_id} already included in blockchain. Ignoring.")
-                    return None
-                if tx_id in notarized_tx_ids:
-                    print(f"Transaction {tx_id} already notarized. Ignoring.")
-                    return None
-    
+
             return Message(msg_type, content, sender)
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}")
             return None
         except Exception as e:
-            print(f"Error during deserialization from socket: {e}")
+            print(f"Error during deserialization: {e}")
             return None
-    
-    @staticmethod
-    def create_start_proposal_message(epoch, sender):
-        """
-        Creates a START_PROPOSAL message.
 
-        Parameters:
-        - epoch (int): The epoch for which the proposal is being started.
-        - sender (int): The ID of the sending node.
-
-        Returns:
-        - Message: A Message object of type START_PROPOSAL.
-        """
-        return Message(MessageType.START_PROPOSAL, epoch, sender)
-    
     @staticmethod
     def create_propose_message(block, sender):
         """
@@ -169,21 +159,6 @@ class Message:
         - Message: A Message object of type ECHO_NOTARIZE.
         """
         return Message(MessageType.ECHO_NOTARIZE, block, sender)
-    
-    @staticmethod
-    def create_transaction_message(transaction, epoch, sender):
-        """
-        Creates a TRANSACTION message.
-
-        Parameters:
-        - transaction (Transaction): The transaction to be sent.
-        - epoch (int): The epoch during which the transaction is created.
-        - sender (int): The ID of the sending node.
-
-        Returns:
-        - Message: A Message object of type TRANSACTION.
-        """
-        return Message(MessageType.TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
     def create_echo_transaction_message(transaction, epoch, sender):
