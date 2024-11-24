@@ -23,21 +23,6 @@ def start_network(num_nodes, total_epochs, delta, base_port, start_time):
                 creationflags=subprocess.CREATE_NEW_CONSOLE
             )
 
-    # Listen for readiness signals from nodes
-    ready_count = 0
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as ready_socket:
-        ready_socket.bind(('localhost', ready_port))
-        ready_socket.listen(num_nodes)
-        print("Waiting for nodes to be ready...")
-
-        while ready_count < num_nodes:
-            conn, _ = ready_socket.accept()
-            with conn:
-                data = conn.recv(1024)
-                if data == b"READY":
-                    ready_count += 1
-                    print(f"Node {ready_count} is ready")
-
     print("All nodes are ready!")
 
 def main():
