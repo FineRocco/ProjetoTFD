@@ -1,57 +1,43 @@
-class Transaction:
-    """
-    Represents a blockchain transaction.
-    
-    Attributes:
-    - tx_id (int): The unique identifier for the transaction.
-    - sender (str): The ID or name of the sender in the transaction.
-    - receiver (str): The ID or name of the receiver in the transaction.
-    - amount (float/int): The amount being transferred in the transaction.
-    """
-    
-    def __init__(self, tx_id, sender, receiver, amount):
-        """
-        Initializes a new Transaction object with a unique ID, sender, receiver, and amount.
-        
-        Parameters:
-        - tx_id (int): The unique identifier for the transaction.
-        - sender (str): The sender’s identifier.
-        - receiver (str): The receiver’s identifier.
-        - amount (float/int): The amount of value being transferred.
-        """
-        self.tx_id = int(tx_id)  
-        self.sender = sender
-        self.receiver = receiver
-        self.amount = amount
-    
-    def to_dict(self):
-        """
-        Serializes the transaction to a dictionary format.
-        
-        Returns:
-        - dict: A dictionary representation of the transaction, containing the transaction ID, sender, receiver, and amount.
-        """
-        return {
-            'tx_id': self.tx_id,
-            'sender': self.sender,
-            'receiver': self.receiver,
-            'amount': self.amount
-        }
-    
-    @staticmethod
-    def from_dict(data):
-        """
-        Deserializes a transaction from a dictionary format.
-        
-        Parameters:
-        - data (dict): A dictionary containing `tx_id`, `sender`, `receiver`, and `amount` fields.
+# node_script.py
+import sys
+from node import Node
 
-        Returns:
-        - Transaction: A Transaction object constructed from the dictionary data.
-        """
-        return Transaction(
-            tx_id=int(data['tx_id']),
-            sender=data['sender'],
-            receiver=data['receiver'],
-            amount=data['amount']
-        )
+def main():
+    """
+    Main function for running a single node in the network.
+    Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>
+    """
+    if len(sys.argv) < 8:
+        print("Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>")
+        input("Press Enter to exit...")
+        sys.exit(1)
+
+    try:
+        node_id = int(sys.argv[1])
+        total_nodes = int(sys.argv[2])
+        total_epochs = int(sys.argv[3])
+        delta = int(sys.argv[4])
+        port = int(sys.argv[5])
+        ports = list(map(int, sys.argv[6].split(',')))
+        start_time = sys.argv[7]
+
+        print(f"Starting Node {node_id} with total_nodes={total_nodes}, port={port}")
+
+        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs=total_epochs, delta=delta, port=port, ports=ports, start_time=start_time)
+        node.set_seed("123456789")  # Set the seed for random leader selection
+
+        # Start the node's network listener
+        node.start_network_listener()
+
+        # Start the node's main loop
+        node.start()
+
+        # Wait for the node to finish
+        node.join()
+
+    except Exception as e:
+        print(f"Error in Node {node_id}: {e}")
+        input("Press Enter to exit...")
+
+if __name__ == "__main__":
+    main()
