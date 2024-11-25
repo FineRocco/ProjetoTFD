@@ -8,6 +8,81 @@ from message import Message, MessageType
 from node import Node
 from transaction import Transaction
 
+
+def handle_incoming_messages(sock, node):
+    # Main loop for handling incoming messages
+    while True:
+        conn, _ = sock.accept()
+        with conn:
+            blockchain_tx_ids = set()
+            for block in node.blockchain:
+                blockchain_tx_ids.update(block.transactions.keys())
+            
+            notarized_tx_ids = node.notarized_tx_ids
+
+            message = Message.deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids)
+            if message is None:
+                print(f"Deserialization failed in Node {node.node_id}. Ignoring message.")
+                continue
+            print(f"Node {node.node_id} received command: {message.type}")
+            threading.Thread(target=process_message, args=(node, message), daemon=True).start()
+
+def process_message(node, message):
+    # Handle various message types
+    if message.type == MessageType.PROPOSE:
+        # Vote on the received proposed block
+        block = message.content
+        node.vote_on_block(block)
+        print(f"Node {node.node_id} voted for block {block.hash.hex()}.")
+
+    elif message.type == MessageType.VOTE:
+        # Handle a vote on a block and update notarization if conditions are met
+        block = message.content
+        block_hash = block.hash.hex()
+        sender_id = message.sender  # Ensure the message includes sender ID
+
+        print(f"Node {node.node_id}: Received Vote from Node {sender_id} for Block {block_hash} in epoch {block.epoch}")
+
+        # Initialize vote tracking structures
+        if block_hash not in node.vote_counts:
+            node.vote_counts[block_hash] = 0
+        if block_hash not in node.voted_senders:
+            node.voted_senders[block_hash] = set()
+
+        # Check if this sender has already voted for this block
+        if sender_id not in node.voted_senders[block_hash]:
+            # Add vote and update vote counts
+            node.vote_counts[block_hash] += 1
+            node.voted_senders[block_hash].add(sender_id)
+            print(f"Node {node.node_id}: Updated vote count for Block {block_hash} to {node.vote_counts[block_hash]}")
+        else:
+            print(f"Node {node.node_id}: Duplicate vote from Node {sender_id} for Block {block_hash}; ignoring.")
+
+        # Check notarization condition
+        node.notarize_block(block)
+        print(f"Node {node.node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
+
+    elif message.type == MessageType.ECHO_NOTARIZE:
+        # Update the node’s view of notarized blocks based on an echo message
+        block = message.content
+        if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
+            node.notarized_blocks[block.epoch] = block
+            # Adicionar tx_id das transações notarizadas via Echo
+            for tx_id in block.transactions.keys():
+                node.notarized_tx_ids.add(tx_id)
+                #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
+            #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
+            node.finalize_blocks()  # Re-check finalization criteria
+
+    elif message.type == MessageType.ECHO_TRANSACTION:
+        # Add echoed transaction to pending transactions if it’s new
+        content = message.content
+        transaction = content['transaction']
+        epoch = content['epoch']
+        #print(f"Echoed Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}, Epoch: {epoch}")
+        node.add_transaction(transaction, epoch)
+        #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
+
 def main():
     """
     Main function for running a single node in the network.
@@ -45,81 +120,11 @@ def main():
         
         # Start listening for commands on the designated port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             sock.bind(('localhost', port))
             sock.listen()
             print(f"Node {node_id} listening on port {port}")
+            handle_incoming_messages(sock, node)
 
-            # Main loop for handling incoming messages
-            while True:
-                conn, _ = sock.accept()
-                with conn:
-                    blockchain_tx_ids = set()
-                    for block in node.blockchain:
-                        blockchain_tx_ids.update(block.transactions.keys())
-                    
-                    notarized_tx_ids = node.notarized_tx_ids
-
-                    message = Message.deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids)
-                    if message is None:
-                        print(f"Deserialization failed in Node {node_id}. Ignoring message.")
-                        continue
-                    print(f"Node {node_id} received command: {message.type}")
-
-                    # Handle various message types
-                    if message.type == MessageType.PROPOSE:
-                        # Vote on the received proposed block
-                        block = message.content
-                        node.vote_on_block(block)
-                        print(f"Node {node_id} voted for block {block.hash.hex()}.")
-
-                    elif message.type == MessageType.VOTE:
-                        # Handle a vote on a block and update notarization if conditions are met
-                        block = message.content
-                        block_hash = block.hash.hex()
-                        sender_id = message.sender  # Ensure the message includes sender ID
-
-                        print(f"Node {node_id}: Received Vote from Node {sender_id} for Block {block_hash} in epoch {block.epoch}")
-
-                        # Initialize vote tracking structures
-                        if block_hash not in node.vote_counts:
-                            node.vote_counts[block_hash] = 0
-                        if block_hash not in node.voted_senders:
-                            node.voted_senders[block_hash] = set()
-
-                        # Check if this sender has already voted for this block
-                        if sender_id not in node.voted_senders[block_hash]:
-                            # Add vote and update vote counts
-                            node.vote_counts[block_hash] += 1
-                            node.voted_senders[block_hash].add(sender_id)
-                            print(f"Node {node_id}: Updated vote count for Block {block_hash} to {node.vote_counts[block_hash]}")
-                        else:
-                            print(f"Node {node_id}: Duplicate vote from Node {sender_id} for Block {block_hash}; ignoring.")
-
-                        # Check notarization condition
-                        node.notarize_block(block)
-                        print(f"Node {node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
-
-                    elif message.type == MessageType.ECHO_NOTARIZE:
-                        # Update the node’s view of notarized blocks based on an echo message
-                        block = message.content
-                        if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
-                            node.notarized_blocks[block.epoch] = block
-                            # Adicionar tx_id das transações notarizadas via Echo
-                            for tx_id in block.transactions.keys():
-                                node.notarized_tx_ids.add(tx_id)
-                                #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
-                            #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
-                            node.finalize_blocks()  # Re-check finalization criteria
-
-                    elif message.type == MessageType.ECHO_TRANSACTION:
-                        # Add echoed transaction to pending transactions if it’s new
-                        content = message.content
-                        transaction = content['transaction']
-                        epoch = content['epoch']
-                        #print(f"Echoed Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}, Epoch: {epoch}")
-                        node.add_transaction(transaction, epoch)
-                        #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
 
 
     except Exception as e:
