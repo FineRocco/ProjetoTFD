@@ -48,9 +48,10 @@ class Node(threading.Thread):
         self.blockchain.append(self.genesis_block)
 
     def next_leader(self, seed):
-        random.seed(seed)
+        epoch_seed = f"{seed}-{self.current_epoch}"
+        random.seed(epoch_seed)  # Use a combined seed for variability
         current_leader = random.randint(0, self.total_nodes - 1)
-        #TDOD Check if chosen leader is alive, if not choose another one.
+        print(f"Node {self.node_id}: Leader for epoch {self.current_epoch} is Node {current_leader}")
         if (current_leader == self.node_id):
             self.propose_block(self.current_epoch)
 
@@ -75,6 +76,7 @@ class Node(threading.Thread):
             self.next_leader(self.seed)
             self.generate_transactions_for_epoch(epoch)
             time.sleep(self.epoch_duration)
+
         self.display_blockchain()
 
     def calculate_start_datetime(self, start_time):
@@ -124,11 +126,15 @@ class Node(threading.Thread):
                 print(f"Node {self.node_id}: Cleared pending_transactions for epoch {epoch} after proposing the block.")
 
         print(f"Node {self.node_id} proposes Block: {new_block.hash.hex()} with previous hash {previous_hash.hex()} and transactions {list(new_block.transactions.keys())}")
+        self.vote_on_block(new_block)
 
         # Create a Propose message and broadcast it
         propose_message = Message.create_propose_message(new_block, self.node_id)
-        self.broadcast_message(propose_message)
-        return new_block
+        threading.Thread(
+        target=self.broadcast_message,
+        args=(propose_message,),
+        daemon=True  # Daemon threads will exit when the main program exits
+        ).start()
 
     def vote_on_block(self, block):
         """
@@ -162,6 +168,11 @@ class Node(threading.Thread):
         # Broadcast vote to all nodes
         vote_message = Message.create_vote_message(block, self.node_id)
         self.broadcast_message(vote_message)
+        threading.Thread(
+        target=self.broadcast_message,
+        args=(vote_message,),
+        daemon=True  # Daemon threads will exit when the main program exits
+        ).start()
 
         # Check if the block should be notarized
         self.notarize_block(block)
@@ -192,7 +203,11 @@ class Node(threading.Thread):
 
                 # Broadcast notarization to all nodes
                 echo_message = Message.create_echo_notarize_message(block, self.node_id)
-                self.broadcast_message(echo_message)
+                threading.Thread(
+                target=self.broadcast_message,
+                args=(echo_message,),
+                daemon=True  # Daemon threads will exit when the main program exits
+                ).start()
                 self.finalize_blocks()
 
     def finalize_blocks(self):
@@ -306,7 +321,11 @@ class Node(threading.Thread):
         if target_id == self.node_id:
             self.add_transaction(transaction, self.current_epoch)
             echo_message = Message.create_echo_transaction_message(transaction, epoch, self.node_id)
-            self.broadcast_message(echo_message)
+            threading.Thread(
+            target=self.broadcast_message,
+            args=(echo_message,),
+            daemon=True  # Daemon threads will exit when the main program exits
+            ).start()
 
     def generate_transactions_for_epoch(self, epoch):
         """
@@ -339,13 +358,13 @@ class Node(threading.Thread):
             return
 
         print(f"Node {self.node_id}: Current Blockchain:")
-        for index, block in enumerate(self.blockchain):
-            print(f"Block {index}:")
+        for block in self.blockchain:  # Directly iterate over blocks
+            print(f"Block (Epoch {block.epoch}):")
             print(f"  Hash: {block.hash.hex()}")
             print(f"  Previous Hash: {block.previous_hash.hex()}")
-            print(f"  Epoch: {block.epoch}")
             print(f"  Transactions: {len(block.transactions)} transactions")
             
             for tx_id, tx in block.transactions.items():  # Unpack tx_id and Transaction object
                 print(f"    Transaction {tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
             print("-" * 40)  # Separator for each block
+

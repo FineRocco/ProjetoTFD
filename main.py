@@ -10,7 +10,6 @@ def start_network(num_nodes, total_epochs, delta, base_port, start_time):
     """
     Launches each node as a separate process and waits for them to be ready.
     """
-    ready_port = 6000  # Port for readiness signaling
     ports = [base_port + i for i in range(num_nodes)]  # Generate a list of ports for nodes
 
     # Start each node process in a new terminal
@@ -29,8 +28,8 @@ def main():
     # Set up argument parsing
     parser = argparse.ArgumentParser(description="Run the Streamlet Protocol with customizable parameters.")
     parser.add_argument("--num_nodes", type=int, default=5, help="The number of nodes in the network.")
-    parser.add_argument("--total_epochs", type=int, default=10, help="The total number of epochs to run.")
-    parser.add_argument("--delta", type=int, default=2, help="The network delay parameter (∆).")
+    parser.add_argument("--total_epochs", type=int, default=20, help="The total number of epochs to run.")
+    parser.add_argument("--delta", type=int, default=4, help="The network delay parameter (∆).")
     parser.add_argument("--start_time", type=str, default="00:00", help="The start time in 24-hour format (HH:MM).")
 
     args = parser.parse_args()

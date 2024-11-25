@@ -117,15 +117,12 @@ def main():
         node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time)
         node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
 
-        
         # Start listening for commands on the designated port
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.bind(('localhost', port))
             sock.listen()
             print(f"Node {node_id} listening on port {port}")
             handle_incoming_messages(sock, node)
-
-
 
     except Exception as e:
         print(f"Error in Node {node_id}: {e}")
