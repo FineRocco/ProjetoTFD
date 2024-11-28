@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import threading
 import socket
 import time
@@ -14,14 +15,17 @@ class Node(threading.Thread):
     Represents a blockchain node in a network running the Streamlet consensus protocol.
     Each node can propose, vote, and notarize blocks, and broadcasts messages to other nodes.
     """
-    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports, start_time):
+    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports, start_time, rejoin):
         super().__init__()
         self.node_id = node_id
         self.total_nodes = total_nodes
         self.total_epochs = total_epochs
         self.epoch_duration = 2 * delta
         self.start_time = start_time
+        self.recovery_completed = False  # Flag to indicate recovery completion
+        self.rejoin = rejoin # Flag to indicate a rejoin
 
+        self.current_leader = -1  # ID of the current leader
         self.tx_id_lock = threading.Lock()  # Lock to synchronize transaction ID generation
         self.global_tx_id = 0  # Global transaction counter
         self.pending_transactions = {}  
@@ -41,18 +45,15 @@ class Node(threading.Thread):
 
         # Initialize notarized_blocks as a dictionary
         self.notarized_blocks = {}
-        
-        # Create and add the genesis block to notarized_blocks
+
         self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions={})
-        self.notarized_blocks[0] = self.genesis_block
-        self.blockchain.append(self.genesis_block)
 
     def next_leader(self, seed):
         epoch_seed = f"{seed}-{self.current_epoch}"
         random.seed(epoch_seed)  # Use a combined seed for variability
-        current_leader = random.randint(0, self.total_nodes - 1)
-        print(f"Node {self.node_id}: Leader for epoch {self.current_epoch} is Node {current_leader}")
-        if (current_leader == self.node_id):
+        self.current_leader = random.randint(0, self.total_nodes - 1)
+        print(f"Node {self.node_id}: Leader for epoch {self.current_epoch} is Node {self.current_leader}")
+        if (self.current_leader == self.node_id):
             self.propose_block(self.current_epoch)
 
     def set_seed(self, seed):
@@ -62,20 +63,48 @@ class Node(threading.Thread):
         self.start()  # Start the thread, which calls run()
 
     def run(self):
-        # Wait for the seed signal to start the protocol
-        start_datetime = self.calculate_start_datetime(self.start_time)
-        self.wait_for_start(start_datetime)
-
-        if not self.seed:
-            print(f"Node {self.node_id}: Seed not set. Exiting run method.")
-            return
+        if not self.rejoin:
+            # Wait to start the protocol
+            start_datetime = self.calculate_start_datetime(self.start_time)
+            self.wait_for_start(start_datetime)
         
-        for epoch in range(1, self.total_epochs + 1):
-            self.current_epoch=epoch
-            print(f"=== Epoch {epoch} ===")
+        # Attempt to load the blockchain from a file
+        self.load_blockchain()
+
+        # Determine if the node is rejoining or starting fresh
+        if self.rejoin:
+            if self.blockchain:
+                # Rejoining node recovers its state
+                print(f"Node {self.node_id}: Detected existing blockchain. Recovering...")
+                self.recover_blockchain()
+            else:
+                print(f"Node {self.node_id}: No blockchain found. Starting from genesis.")
+                self.notarized_blocks[0] = self.genesis_block
+                self.blockchain.append(self.genesis_block)
+        else:
+            # New node adds the genesis block
+            if not self.blockchain:
+                self.notarized_blocks[0] = self.genesis_block
+                self.blockchain.append(self.genesis_block)
+
+        # Determine current epoch based on the saved blockchain
+        last_saved_epoch = max(block.epoch for block in self.blockchain) if self.blockchain else 0
+        self.current_epoch = last_saved_epoch + 1
+        
+        for epoch in range(self.current_epoch, self.total_epochs + 1):
+            self.current_epoch = epoch
+            print(f"==================================== Epoch {epoch} ====================================")
             self.next_leader(self.seed)
-            self.generate_transactions_for_epoch(epoch)
+            threading.Thread(target=self.generate_transactions_for_epoch,args=(epoch,),daemon=True).start()
+
+            # # Broadcast EPOCH_COMPLETE at the end of the epoch
+            # epoch_complete_message = Message(MessageType.EPOCH_COMPLETE, {"epoch": self.current_epoch}, self.node_id)
+            # self.broadcast_message(epoch_complete_message)
+
             time.sleep(self.epoch_duration)
+
+            # Save the blockchain after the epoch
+            self.save_blockchain()
 
         self.display_blockchain()
 
@@ -130,11 +159,7 @@ class Node(threading.Thread):
 
         # Create a Propose message and broadcast it
         propose_message = Message.create_propose_message(new_block, self.node_id)
-        threading.Thread(
-        target=self.broadcast_message,
-        args=(propose_message,),
-        daemon=True  # Daemon threads will exit when the main program exits
-        ).start()
+        threading.Thread(target=self.broadcast_message,args=(propose_message,),daemon=True).start()
 
     def vote_on_block(self, block):
         """
@@ -168,11 +193,7 @@ class Node(threading.Thread):
         # Broadcast vote to all nodes
         vote_message = Message.create_vote_message(block, self.node_id)
         self.broadcast_message(vote_message)
-        threading.Thread(
-        target=self.broadcast_message,
-        args=(vote_message,),
-        daemon=True  # Daemon threads will exit when the main program exits
-        ).start()
+        threading.Thread(target=self.broadcast_message,args=(vote_message,),daemon=True).start()
 
         # Check if the block should be notarized
         self.notarize_block(block)
@@ -204,10 +225,7 @@ class Node(threading.Thread):
                 # Broadcast notarization to all nodes
                 echo_message = Message.create_echo_notarize_message(block, self.node_id)
                 threading.Thread(
-                target=self.broadcast_message,
-                args=(echo_message,),
-                daemon=True  # Daemon threads will exit when the main program exits
-                ).start()
+                target=self.broadcast_message,args=(echo_message,),daemon=True).start()
                 self.finalize_blocks()
 
     def finalize_blocks(self):
@@ -351,6 +369,115 @@ class Node(threading.Thread):
                     print(f"Node {self.node_id} could not connect to Node at port {target_port}")
                 except Exception as e:
                     print(f"Node {self.node_id} encountered an error while broadcasting to port {target_port}: {e}")
+
+    def send_message_to_port(self, target_port, message):
+        """
+        Sends a message to a specific port.
+
+        Parameters:
+        - target_port (int): The port of the target node.
+        - message (Message): The message to send.
+        """
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.connect(('localhost', target_port))
+                s.sendall(message.serialize())
+                print(f"Node {self.node_id}: Sent {message.type} to port {target_port}")
+        except Exception as e:
+            print(f"Node {self.node_id}: Error sending {message.type} to port {target_port}: {e}")
+
+    def save_blockchain(self):
+        """Saves the blockchain to a file without using list comprehensions."""
+        file_name = f"blockchain_{self.node_id}.json"
+        blockchain_data = []  # Initialize an empty list to hold the serialized blocks
+
+        # Process each block in the blockchain
+        for block in self.blockchain:
+            # Serialize block data
+            serialized_block = {
+                "epoch": block.epoch,
+                "previous_hash": block.previous_hash.hex(),
+                "transactions": [],  # Initialize an empty list for transactions
+                "hash": block.hash.hex()
+            }
+
+            # Process each transaction in the block
+            for tx_id, tx in block.transactions.items():
+                serialized_transaction = {
+                    "tx_id": tx_id,
+                    "sender": tx.sender,
+                    "receiver": tx.receiver,
+                    "amount": tx.amount
+                }
+                # Add the serialized transaction to the block's transactions list
+                serialized_block["transactions"].append(serialized_transaction)
+
+            # Add the serialized block to the blockchain data
+            blockchain_data.append(serialized_block)
+
+        # Write the serialized blockchain data to a file
+        try:
+            with open(file_name, 'w') as f:
+                json.dump(blockchain_data, f, indent=4)
+            print(f"Node {self.node_id}: Blockchain saved to {file_name}")
+        except Exception as e:
+            print(f"Node {self.node_id}: Error saving blockchain to file: {e}")
+
+    def load_blockchain(self):
+        """Loads the blockchain from a file."""
+        file_name = f"blockchain_{self.node_id}.json"
+        try:
+            with open(file_name, 'r') as f:
+                blockchain_data = json.load(f)
+            blockchain = []
+            for block_data in blockchain_data:
+                block = Block(
+                    epoch=block_data["epoch"],
+                    previous_hash=bytes.fromhex(block_data["previous_hash"]),
+                    transactions={
+                        tx["tx_id"]: Transaction(
+                            tx_id=tx["tx_id"], sender=tx["sender"], receiver=tx["receiver"], amount=tx["amount"]
+                        )
+                        for tx in block_data["transactions"]
+                    }
+                )
+                blockchain.append(block)
+            self.blockchain = blockchain
+            self.notarized_blocks = {block.epoch: block for block in self.blockchain}
+            print(f"Node {self.node_id}: Blockchain loaded from {file_name}")
+        except FileNotFoundError:
+            print(f"Node {self.node_id}: No saved blockchain file found.")
+        except Exception as e:
+            print(f"Node {self.node_id}: Error loading blockchain from file: {e}")
+
+    def recover_blockchain(self):
+        """
+        Recover the blockchain for a rejoining node.
+        """
+        print(f"Node {self.node_id}: Starting blockchain recovery...")
+
+        # Load blockchain from file
+        self.load_blockchain()
+
+        # Determine the last saved epoch
+        last_saved_epoch = max(block.epoch for block in self.blockchain) if self.blockchain else 0
+        print(f"Node {self.node_id}: Last saved epoch: {last_saved_epoch}")
+
+        # Broadcast QUERY_MISSING_BLOCKS with the last saved epoch
+        query_message = Message(MessageType.QUERY_MISSING_BLOCKS, {"last_epoch": last_saved_epoch}, self.port)
+        self.broadcast_message(query_message)
+
+        # Wait for missing blocks to be recovered
+        start_time = time.time()
+        while not self.recovery_completed:
+            if time.time() - start_time > 15:  # Timeout after 15 seconds
+                print(f"Node {self.node_id}: Recovery timeout. Proceeding with partial blockchain.")
+                break
+            time.sleep(0.1)
+
+        # Ensure the current epoch is updated after recovery
+        self.current_epoch = max(block.epoch for block in self.blockchain) + 1 if self.blockchain else 1
+        print(f"Node {self.node_id}: Blockchain recovery complete. Current epoch: {self.current_epoch}")
 
     def display_blockchain(self):
         if not self.blockchain:

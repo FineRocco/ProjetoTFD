@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
+import json
 import random
 import socket
 import sys
 import threading
 import time
+from block import Block
 from message import Message, MessageType
 from node import Node
 from transaction import Transaction
@@ -83,49 +85,96 @@ def process_message(node, message):
         node.add_transaction(transaction, epoch)
         #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
 
+    elif message.type == MessageType.QUERY_MISSING_BLOCKS:
+        # Respond with missing blocks
+        last_epoch = message.content.get("last_epoch")
+        sender = message.sender
+        print(f"Node {node.node_id}: Received QUERY_MISSING_BLOCKS from Node {sender} with last_epoch {last_epoch}")
+
+        # Collect missing blocks from last_epoch + 1 to current_epoch
+        missing_blocks = [
+            node.notarized_blocks[epoch].to_dict()
+            for epoch in range(last_epoch + 1, node.current_epoch + 1)
+            if epoch in node.notarized_blocks
+        ]
+
+        # Debugging: Print the missing blocks
+        print(f"Node {node.node_id}: Missing blocks to send to Node {sender}:")
+        for block in missing_blocks:
+            print(f"  Epoch {block['epoch']}, Hash: {block['hash']}")
+
+        # Send RESPONSE_MISSING_BLOCKS with the missing blocks
+        response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": missing_blocks}, node.node_id)
+        node.send_message_to_port(sender, response_message)
+
+    elif message.type == MessageType.RESPONSE_MISSING_BLOCKS:
+        if node.recovery_completed:
+            print(f"Node {node.node_id}: Recovery already completed. Ignoring RESPONSE_MISSING_BLOCKS.")
+            return
+        
+        missing_blocks = message.content.get("missing_blocks", [])
+        # Add the missing blocks to the blockchain
+        for block_data in missing_blocks:
+            block = block_data
+            if block.epoch not in node.notarized_blocks:
+                node.notarized_blocks[block.epoch] = block
+                node.blockchain.append(block)
+                print(f"Node {node.node_id}: Recovered Block for epoch {block.epoch}")
+
+        # Check if recovery is now complete
+        if missing_blocks:
+            latest_recovered_epoch = max(block.epoch for block in missing_blocks)
+            if latest_recovered_epoch >= node.current_epoch - 1:
+                node.recovery_completed = True
+                print(f"Node {node.node_id}: Recovery completed after receiving missing blocks.")
+
 def main():
-    """
-    Main function for running a single node in the network.
-
-    The function initializes the node, signals readiness to the Streamlet network,
-    and listens for various message types (e.g., proposals, votes, notarizations, transactions).
-    Based on the received message type, the node performs actions like proposing blocks,
-    voting, notarizing, and displaying the blockchain.
-
-    Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>
-    """
-    
-    # Verify command-line arguments
-    if len(sys.argv) < 8:
-        print("Usage: node_script.py <node_id> <total_nodes> <total_epochs> <delta> <port> <ports> <start_time>")
-        input("Press Enter to exit...")  # Keeps the window open if arguments are missing
+    # Check if command-line arguments are provided
+    if len(sys.argv) < 5:
+        print("Usage: node_script.py <node_id> <port> <rejoin> <network_config_file>")
         sys.exit(1)
 
+    # Parse command-line arguments
+    node_id = int(sys.argv[1])
+    port = int(sys.argv[2])
+    rejoin = sys.argv[3].lower() == "true"  # Convert "True"/"False" to a boolean
+    network_config_file = sys.argv[4]
+
+    # Load network configuration
     try:
-        # Parse command-line arguments
-        node_id = int(sys.argv[1])
-        total_nodes = int(sys.argv[2])
-        total_epochs = int(sys.argv[3])
-        delta = int(sys.argv[4])
-        port = int(sys.argv[5])
-        ports = list(map(int, sys.argv[6].split(',')))  # List of network ports
-        start_time = sys.argv[7]  # Start time in HH:MM format
+        with open(network_config_file, "r") as f:
+            network_config = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: Network configuration file {network_config_file} not found.")
+        sys.exit(1)
+    except json.JSONDecodeError:
+        print(f"Error: Invalid JSON format in file {network_config_file}.")
+        sys.exit(1)
 
-        print(f"Starting Node {node_id} with total_nodes={total_nodes}, port={port}")
+    # Extract network configuration
+    total_nodes = network_config["num_nodes"]
+    total_epochs = network_config["total_epochs"]
+    delta = network_config["delta"]
+    start_time = network_config["start_time"]
+    ports = network_config["ports"]
 
-        # Initialize the Node
-        node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time)
-        node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
+    print(f"Starting Node {node_id} with the following configuration:")
+    print(f"Node ID: {node_id}")
+    print(f"Port: {port}")
+    print(f"Rejoin: {rejoin}")
+    print("Network Info:")
+    print(json.dumps(network_config, indent=4))
 
-        # Start listening for commands on the designated port
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.bind(('localhost', port))
-            sock.listen()
-            print(f"Node {node_id} listening on port {port}")
-            handle_incoming_messages(sock, node)
+    # Initialize the Node
+    node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time, rejoin=rejoin)
+    node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
 
-    except Exception as e:
-        print(f"Error in Node {node_id}: {e}")
+    # Start listening for commands on the designated port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(('localhost', port))
+        sock.listen()
+        print(f"Node {node_id} listening on port {port}")
+        handle_incoming_messages(sock, node)
 
     input("Press Enter to exit...")  # Prevent the terminal from closing instantly
 

@@ -10,8 +10,9 @@ class MessageType:
     VOTE = "VOTE"
     ECHO_NOTARIZE = "ECHO_NOTARIZE"
     ECHO_TRANSACTION = "ECHO_TRANSACTION"
-    DISPLAY_BLOCKCHAIN = "DISPLAY_BLOCKCHAIN"
-    SEED = "SEED"
+    QUERY_MISSING_BLOCKS = "QUERY_MISSING_BLOCKS"  # Request for missing blocks
+    RESPONSE_MISSING_BLOCKS = "RESPONSE_MISSING_BLOCKS"  # Response with missing blocks
+    EPOCH_COMPLETE = "EPOCH_COMPLETE"  # Signal broadcasted at the end of each epoch
 
 class Message:
     """
@@ -48,10 +49,19 @@ class Message:
         elif isinstance(self.content, Transaction):
             content = self.content.to_dict()
         elif isinstance(self.content, dict):
-            content = self.content  
+            if self.type == MessageType.RESPONSE_MISSING_BLOCKS:
+                # Use the missing_blocks list directly if it already contains dictionaries
+                content = {
+                    "missing_blocks": [
+                        block.to_dict() if isinstance(block, Block) else block
+                        for block in self.content.get("missing_blocks", [])
+                    ]
+                }
+            else:
+                content = self.content
         else:
-            content = self.content  
-        
+            content = self.content
+
         return json.dumps({
             'type': self.type,
             'content': content,
@@ -59,14 +69,14 @@ class Message:
         }).encode('utf-8')
     
     @staticmethod
-    def deserialize_from_socket(conn, blockchain_tx_ids, notarized_tx_ids):
+    def deserialize_from_socket(conn, blockchain_tx_ids=None, notarized_tx_ids=None):
         """
         Deserializes a message received from a socket.
 
         Parameters:
         - conn (socket): The socket connection from which data is received.
-        - blockchain_tx_ids (set): Set of transaction IDs already included in the blockchain.
-        - notarized_tx_ids (set): Set of transaction IDs already notarized.
+        - blockchain_tx_ids (set, optional): Set of transaction IDs already included in the blockchain.
+        - notarized_tx_ids (set, optional): Set of transaction IDs already notarized.
 
         Returns:
         - Message: A Message object or None if deserialization fails.
@@ -78,9 +88,6 @@ class Message:
                 return None
 
             obj = json.loads(data.decode('utf-8'))
-            #print(f"Decoded object: {obj}")  # Debugging line
-
-            # Extract fields from the JSON object
             msg_type = obj.get('type')
             content = obj.get('content')
             sender = obj.get('sender', None)
@@ -109,48 +116,24 @@ class Message:
                 else:
                     print(f"Invalid content format for ECHO_TRANSACTION: {content}")
                     return None
-            elif msg_type == MessageType.SEED:
-                # Handle SEED message type
-                if not isinstance(content, str):
-                    print(f"Invalid SEED content: {content}")
+            elif msg_type == MessageType.RESPONSE_MISSING_BLOCKS:
+                if isinstance(content, dict) and "missing_blocks" in content:
+                    content["missing_blocks"] = [
+                        Block.from_dict(block_data) for block_data in content["missing_blocks"]
+                    ]
+                else:
+                    print(f"Invalid content format for RESPONSE_MISSING_BLOCKS: {content}")
                     return None
-            elif msg_type == MessageType.DISPLAY_BLOCKCHAIN:
-                content = None  # No additional content expected
+            elif msg_type in [MessageType.QUERY_MISSING_BLOCKS]:
+                # QUERY messages don't have complex content
+                pass
             else:
                 print(f"Unknown message type: {msg_type}")
                 return None
 
-            # Additional checks for transactions
-            if msg_type == MessageType.ECHO_TRANSACTION:
-                tx_id = content['transaction'].tx_id
-                if tx_id in blockchain_tx_ids:
-                    print(f"Transaction {tx_id} already included in blockchain. Ignoring.")
-                    return None
-                if tx_id in notarized_tx_ids:
-                    print(f"Transaction {tx_id} already notarized. Ignoring.")
-                    return None
-
             return Message(msg_type, content, sender)
         except json.JSONDecodeError as e:
             print(f"JSON decode error: {e}")
-            return None
-        except Exception as e:
-            print(f"Error during deserialization from socket: {e}")
-            return None
-    
-    @staticmethod
-    def create_seed_message(seed, sender):
-        """
-        Creates a seed message.
-
-        Parameters:
-        - Seed: seed for random function.
-        - sender (int): The ID of the sending node.
-
-        Returns:
-        - Message: A Message object of type SEED.
-        """
-        return Message(MessageType.SEED, seed, sender)
     
     @staticmethod
     def create_propose_message(block, sender):
@@ -210,14 +193,11 @@ class Message:
         return Message(MessageType.ECHO_TRANSACTION, {'transaction': transaction.to_dict(), 'epoch': epoch}, sender)
     
     @staticmethod
-    def create_display_blockchain_message(sender):
-        """
-        Creates a DISPLAY_BLOCKCHAIN message.
+    def create_query_missing_blocks_message(last_epoch, sender):
+        """Creates a QUERY_MISSING_BLOCKS message."""
+        return Message(MessageType.QUERY_MISSING_BLOCKS, {"last_epoch": last_epoch}, sender)
 
-        Parameters:
-        - sender (int): The ID of the sending node.
-
-        Returns:
-        - Message: A Message object of type DISPLAY_BLOCKCHAIN.
-        """
-        return Message(MessageType.DISPLAY_BLOCKCHAIN, None, sender)
+    @staticmethod
+    def create_response_missing_blocks_message(missing_blocks, sender):
+        """Creates a RESPONSE_MISSING_BLOCKS message."""
+        return Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": [block.to_dict() for block in missing_blocks]}, sender)
