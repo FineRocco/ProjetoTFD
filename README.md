@@ -27,7 +27,7 @@ O código está organizado em múltiplos ficheiros:
 - **`node_script.py`**: Script auxiliar para iniciar cada nó como um processo separado.
 
 ## Como Executar
-
+vgfgf
 ### Dependências
 - **Python 3.7+**
 - Nenhuma dependência externa é necessária.
