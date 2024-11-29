@@ -10,6 +10,21 @@
 
 This project implements the Streamlet consensus algorithm, a protocol for achieving consensus in a distributed network. The protocol ensures consistency across nodes, making it suitable for distributed ledgers, blockchain, or service replication through the state machine approach. The implementation includes a node library, local transaction generation, and block ordering, all in a decentralized setup.
 
+## Comands
+
+Delete Json Files:
+
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/delete_blockchain_files.py
+
+Start main with all nodes terminal with the config file location:
+
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/main.py --network_config_file network_info.json
+
+Command to open individual node with flag rejoin activated:
+
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/node_script.py 1 5001 True network_info.json
+
+
 ### Key Components
 
 - **`streamletnetwork.py`**: Manages the network of nodes, leader rotation, and transaction distribution.
