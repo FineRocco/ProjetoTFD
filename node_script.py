@@ -26,8 +26,9 @@ def handle_incoming_messages(sock, node):
             if message is None:
                 print(f"Deserialization failed in Node {node.node_id}. Ignoring message.")
                 continue
-            print(f"Node {node.node_id} received command: {message.type}")
-            threading.Thread(target=process_message, args=(node, message), daemon=True).start()
+            # Enqueue the message
+            with node.message_queue_lock:
+                node.message_queue.append(message)
 
 def process_message(node, message):
     # Handle various message types
@@ -67,13 +68,13 @@ def process_message(node, message):
     elif message.type == MessageType.ECHO_NOTARIZE:
         # Update the node’s view of notarized blocks based on an echo message
         block = message.content
-        if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
-            node.notarized_blocks[block.epoch] = block
-            # Adicionar tx_id das transações notarizadas via Echo
+        if block.epoch not in node.notarized_blocks or block not in node.notarized_blocks[block.epoch]:
+            if block.epoch not in node.notarized_blocks:
+                node.notarized_blocks[block.epoch] = []
+            node.notarized_blocks[block.epoch].append(block)
+            # Add tx_id of transactions notarized via Echo
             for tx_id in block.transactions.keys():
                 node.notarized_tx_ids.add(tx_id)
-                #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
-            #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
             node.finalize_blocks()  # Re-check finalization criteria
 
     elif message.type == MessageType.ECHO_TRANSACTION:
@@ -81,9 +82,7 @@ def process_message(node, message):
         content = message.content
         transaction = content['transaction']
         epoch = content['epoch']
-        #print(f"Echoed Transaction ID: {transaction.tx_id}, Sender: {transaction.sender}, Receiver: {transaction.receiver}, Amount: {transaction.amount}, Epoch: {epoch}")
         node.add_transaction(transaction, epoch)
-        #print(f"Node {node_id} added echoed transaction {transaction.tx_id} to pending transactions for epoch {epoch}.")
 
     elif message.type == MessageType.QUERY_MISSING_BLOCKS:
         # Respond with missing blocks
@@ -92,20 +91,20 @@ def process_message(node, message):
         print(f"Node {node.node_id}: Received QUERY_MISSING_BLOCKS from Node {sender} with last_epoch {last_epoch}")
 
         # Collect missing blocks from last_epoch + 1 to current_epoch
-        missing_blocks = [
-            node.notarized_blocks[epoch].to_dict()
-            for epoch in range(last_epoch + 1, node.current_epoch + 1)
-            if epoch in node.notarized_blocks
-        ]
+        missing_blocks = []
+        for epoch in range(last_epoch + 1, node.current_epoch + 1):
+            if epoch in node.notarized_blocks:
+                for block in node.notarized_blocks[epoch]:
+                    missing_blocks.append(block)
 
         # Debugging: Print the missing blocks
         print(f"Node {node.node_id}: Missing blocks to send to Node {sender}:")
         for block in missing_blocks:
-            print(f"  Epoch {block['epoch']}, Hash: {block['hash']}")
+            print(f"  Epoch {block.epoch}, Hash: {block.hash.hex()}")
 
         # Send RESPONSE_MISSING_BLOCKS with the missing blocks
-        response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": missing_blocks}, node.node_id)
-        node.send_message_to_port(sender, response_message)
+        response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": [block.to_dict() for block in missing_blocks]}, node.node_id)
+        node.send_message_to_port(node.ports[sender], response_message)
 
     elif message.type == MessageType.RESPONSE_MISSING_BLOCKS:
         if node.recovery_completed:
@@ -115,15 +114,15 @@ def process_message(node, message):
         missing_blocks = message.content.get("missing_blocks", [])
         # Add the missing blocks to the blockchain
         for block_data in missing_blocks:
-            block = block_data
+            block = Block.from_dict(block_data)
             if block.epoch not in node.notarized_blocks:
-                node.notarized_blocks[block.epoch] = block
+                node.notarized_blocks[block.epoch] = [block]
                 node.blockchain.append(block)
                 print(f"Node {node.node_id}: Recovered Block for epoch {block.epoch}")
 
         # Check if recovery is now complete
         if missing_blocks:
-            latest_recovered_epoch = max(block.epoch for block in missing_blocks)
+            latest_recovered_epoch = max(block.epoch for block in node.blockchain)
             if latest_recovered_epoch >= node.current_epoch - 1:
                 node.recovery_completed = True
                 print(f"Node {node.node_id}: Recovery completed after receiving missing blocks.")
@@ -157,6 +156,8 @@ def main():
     delta = network_config["delta"]
     start_time = network_config["start_time"]
     ports = network_config["ports"]
+    confusion_start = network_config.get("confusion_start", None)
+    confusion_duration = network_config.get("confusion_duration", None)
 
     print(f"Starting Node {node_id} with the following configuration:")
     print(f"Node ID: {node_id}")
@@ -166,7 +167,18 @@ def main():
     print(json.dumps(network_config, indent=4))
 
     # Initialize the Node
-    node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time, rejoin=rejoin)
+    node = Node(
+        node_id=node_id,
+        total_nodes=total_nodes,
+        total_epochs=total_epochs,
+        delta=delta,
+        port=port,
+        ports=ports,
+        start_time=start_time,
+        rejoin=rejoin,
+        confusion_start=confusion_start,
+        confusion_duration=confusion_duration
+    )
     node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
 
     # Start listening for commands on the designated port
@@ -174,9 +186,11 @@ def main():
         sock.bind(('localhost', port))
         sock.listen()
         print(f"Node {node_id} listening on port {port}")
-        handle_incoming_messages(sock, node)
+        threading.Thread(target=handle_incoming_messages, args=(sock, node), daemon=True).start()
 
-    input("Press Enter to exit...")  # Prevent the terminal from closing instantly
+        # Keep the main thread alive
+        while True:
+            time.sleep(1)
 
 if __name__ == "__main__":
     main()
