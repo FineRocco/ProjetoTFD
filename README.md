@@ -6,104 +6,120 @@
 - **Denis Ungureanu** - nº 56307
 - **Ana Luís** - nº 53563
 
-## Descrição do Projeto
-Este projeto implementa o protocolo de consenso Streamlet, projetado para sistemas distribuídos tolerantes a falhas. O protocolo é usado para manter um ledger distribuído, garantindo a ordenação consistente de blocos de transações em presença de falhas de comunicação e de nós. Ele também aborda cenários com forks e garante a convergência para uma única cadeia finalizada de blocos.
+## Project Overview
 
-### Características Principais
-1. **Seleção Determinística de Líderes**: Os líderes de cada época são selecionados de maneira determinística com base no número da época.
-2. **Período de Confusão**: Implementa um período que simula forks para testar a robustez do protocolo em situações de atraso ou falhas na rede.
-3. **Finalização e Notarização**: Blocos são finalizados após a observação de três blocos consecutivos notarizados.
-4. **Transações Distribuídas**: Cada nó pode gerar, transmitir e processar transações de maneira eficiente.
-5. **Tolerância a Falhas**: O sistema é robusto contra falhas de nós e atrasos de mensagens.
+This project implements the Streamlet consensus algorithm, a protocol for achieving consensus in a distributed network. The protocol ensures consistency across nodes, making it suitable for distributed ledgers, blockchain, or service replication through the state machine approach. The implementation includes a node library, local transaction generation, and block ordering, all in a decentralized setup.
 
-## Estrutura do Projeto
-O código está organizado em múltiplos ficheiros:
+## Comands
 
-- **`main.py`**: Script principal para iniciar a rede de nós distribuídos.
-- **`block.py`**: Implementação da classe `Block`, que representa cada bloco da blockchain.
-- **`transaction.py`**: Implementação da classe `Transaction`, que representa as transações do sistema.
-- **`message.py`**: Define as mensagens usadas na comunicação entre os nós.
-- **`node.py`**: Implementação da lógica de cada nó na rede.
-- **`node_script.py`**: Script auxiliar para iniciar cada nó como um processo separado.
+Delete Json Files:
 
-## Como Executar
-vgfgf
-### Dependências
-- **Python 3.7+**
-- Nenhuma dependência externa é necessária.
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/delete_blockchain_files.py
 
-### Passos
-1. Clone este repositório:
-   ```bash
-   git clone <url-do-repositório>
-   cd <nome-do-repositório>
-   ```
+Start main with all nodes terminal with the config file location:
 
-2. Execute o script principal para iniciar a rede de nós:
-   ```bash
-   python3 main.py --num_nodes 5 --total_epochs 10 --delta 2 --start_time "00:00" --base_port 5000
-   ```
-   
-   **Parâmetros:**
-   - `--num_nodes`: Número de nós na rede.
-   - `--total_epochs`: Total de épocas a serem executadas.
-   - `--delta`: Duração de uma rodada (em segundos).
-   - `--start_time`: Hora de início no formato `HH:MM`.
-   - `--base_port`: Porta inicial para os nós.
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/main.py --network_config_file network_info.json
 
-3. Visualize os logs de cada nó para acompanhar a execução do protocolo.
+Command to open individual node with flag rejoin activated:
 
-## Testes e Validação
-O código foi cuidadosamente revisado para garantir conformidade com os requisitos do protocolo Streamlet, incluindo:
+& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/node_script.py 1 5001 True network_info.json
 
-1. **Tolerância a falhas**:
-   - Simulação de falhas de nós e atrasos de mensagens.
-   - Testado para convergência após períodos de confusão.
 
-2. **Finalização de Blocos**:
-   - Verificado que três blocos consecutivos notarizados resultam na finalização do segundo bloco e de sua cadeia pai.
+### Key Components
 
-3. **Convergência**:
-   - Testado para garantir que, após forks, todos os nós convergem para uma única cadeia finalizada.
+- **`streamletnetwork.py`**: Manages the network of nodes, leader rotation, and transaction distribution.
+- **`transaction.py`**: Defines the structure of transactions, each containing an ID, sender, receiver, and amount.
+- **`block.py`**: Represents a block in the Blockchain, storing transactions, the epoch number, and a link to the previous block through its hash.
+- **`node.py`**: Represents each node in the network, handling block proposals, voting, notarization, and blockchain management.
+- **`node_script.py`**: Main function for running a single node in the network.
+- **`message.py`**: Defines message types for communication between nodes, including transactions, votes, proposals, and notarizations.
+- **`main.py`**: Entry point for configuring and running the Streamlet protocol simulation.
 
-## Estrutura de Dados
-- **`Block`**: Representa cada bloco na blockchain.
-  - Campos: `epoch`, `previous_hash`, `transactions`, `length`, `hash`
-- **`Transaction`**: Representa uma transação.
-  - Campos: `tx_id`, `sender`, `receiver`, `amount`
-- **`Message`**: Representa as mensagens entre os nós.
-  - Campos: `type`, `content`, `sender`
+### Features
 
-## Limitações Conhecidas
-1. Atualmente, as mensagens são limitadas a 4096 bytes.
-2. Os nós devem ser executados na mesma máquina ou em redes locais.
+- **Fault Tolerance**: Handles network partitions, crash faults, and ensures blockchain persistence across nodes.
+- **Leader Rotation**: Rotates leader roles each epoch, enabling fair participation in proposing blocks.
+- **Consensus Mechanism**: Ensures nodes reach agreement on the blockchain state through voting and notarization.
+- **Blockchain Persistence**: Nodes can save and recover the blockchain state, preserving transaction history.
 
----
+### Running the Simulation
 
-# Alterações relativamente ao DenisBranch (24/11)
+To run the simulation, follow these steps:
 
-## Lidando com falhas de liderança em node.py:
+1. **Clone the Repository**: Clone the project repository to your local machine.
 
-Modificou o runmétodo para incluir um mecanismo de timeout. Os nós esperam por uma proposta do líder pela duração de epoch_duration. Se nenhuma proposta for recebida, o próximo nó na fila atua como um líder de backup.
-Ajustou o get_leadermétodo para implementar a lógica do período de confusão conforme os requisitos do projeto, criando bifurcações durante épocas específicas.
-Durante o período de confusão, o líder está determinado de forma diferente a criar bifurcações.
+2. **Execute `main.py`**:
+    Run the following command with deafult parameters: 5 nodes, 10 epochs, 2 seconds delta.
+    ```bash
+    python main.py
+    ```
+    OR
+    Run the following command in the terminal with customizable parameters for nodes, epochs, and network delay:
+    ```bash
+    python main.py --num_nodes <NUMBER_OF_NODES> --total_epochs <TOTAL_EPOCHS> --delta <NETWORK_DELAY>
+    ```
 
-## Processamento de mensagens durante o período de confusão:
+3. **Observe Outputs**:
+ - The protocol will output each node's actions, including transaction generation, block proposals, voting, and finalization.
+ - The simulation will also show the finalized blockchain at each node upon completion.
 
-Garantiu que o processamento de mensagens continuasse durante o período de confusão, mas fosse tratado de uma forma que permitisse a ocorrência de bifurcações.
-Ajustou o loop de processamento de mensagens para sempre processar mensagens, mas controlar a seleção do líder para criar a confusão desejada.
+# Code Overview
 
-## Avanço de Época:
+## `main.py`
+- **Argument Parsing**: Allows customization of the number of nodes, epochs, and network delay for the Streamlet protocol.
+- **Network Initialization**: Creates and starts the `StreamletNetwork` with specified parameters.
+- **Epoch Execution**: Runs the protocol for a given number of epochs, rotating leaders and generating transactions.
+- **Network Termination**: Stops the network after all epochs are completed and finalizes the blockchain display.
 
-Os nós avançam épocas independentemente com base no for-loop no runmétodo. Isso impede que os nós esperem indefinidamente por mensagens de nós travados.
-Ao permitir que os líderes de backup intervenham, os nós podem continuar a processar e finalizar blocos mesmo quando alguns nós falham.
+## `StreamletNetwork`
+- **Network Setup**: Initializes multiple nodes, assigns leader roles, and starts a transaction generation thread.
+- **Epoch Management**: Handles leader rotation and initiates block proposals each epoch.
+- **Transaction Broadcasting**: Ensures transactions are evenly distributed across nodes in the network.
 
-## Lógica de Finalização:
+## `Node`
+- **Block Proposal**: The leader node for each epoch proposes a block containing the list of pending transactions.
+- **Voting and Notarization**: Nodes vote on blocks based on chain length and notarize blocks that receive a majority.
+- **Finalization**: Finalizes a block if three consecutive blocks are notarized, appending it to the local blockchain.
+- **Transaction Management**: Clears pending transactions across nodes after a proposal.
 
-O finalize_blocksmétodo permanece consistente, finalizando um bloco quando ele é seguido por mais dois blocos autenticados na cadeia, independentemente de lacunas de época causadas por nós travados.
+## `Message`
+- **Serialization**: Manages serialization and deserialization of messages between nodes, including block proposals, votes, and transactions.
+- **Message Types**: Defines `MessageType` constants for organized communication (`START_PORPOSAL`,`PROPOSE`, `VOTE`, `TRANSACTION`, `ECHO_TRANSACTION`, `ECHO_NOTARIZE`, `DISPLAY_BLOCKCHAIN`).
 
----
+## `node_script.py`
+- **Node Initialization**: Initializes an individual node, loads configuration parameters, and signals readiness to the Streamlet Network.
+- **Message Handling**: Processes different message types received by the node.
+  - **START_PROPOSAL**: Initiates a block proposal if the node is the designated leader for the current epoch.
+  - **PROPOSE**: Receives and votes on proposed blocks from other nodes.
+  - **VOTE**: Tracks votes for blocks, updates notarizations, and ensures no duplicate votes from the same node.
+  - **ECHO_NOTARIZE**: Processes echoed notarizations to update the node’s view of the blockchain.
+  - **TRANSACTION**: Adds new transactions to pending transactions and broadcasts them.
+  - **ECHO_TRANSACTION**: Adds echoed transactions to ensure consistent transaction state across nodes.
+  - **DISPLAY_BLOCKCHAIN**: Outputs the current blockchain state to the console.
+- **Error Handling**: Logs and handles potential exceptions during message processing to maintain robustness.
 
-**Licença**
+## `Professor`
 
-Este projeto é licenciado sob a MIT License. Consulte o arquivo `LICENSE` para mais informações.
+Retirar prints, so interesaa a blockchain
+
+20 epocas, so pode ter 19 blocos finalizados
+
+fazer testes com 2 nos a crashar
+
+O terminal main do streamlet network devia desaparecer depois de iniciar a blockhcain. 
+
+Os nós deviam gerar as transactions
+
+A network tem de definjr uma seed para o random e passa a seed para todos os nós, e cada nó usa a seed para gerar um numero random para definir o lider entre eles. O prof disse
+
+A network server para iniciar a blockchain e depois fechar
+
+Deviamos usar os mesmos sockets, sem abrir e fechar sockets para cada broadcast que fazemos. O prof disse
+
+Começar com um tempo definido para arrancar  & uma lista de ip, ports e node_id & configurações (nu_nodes, num_epocas, delta)
+
+Quando um broadcast é feito e um nó crashou, os outros nó definem esse socket como null e o próximo broadcast os tentam connectar de novo a esse
+
+O genesis block é o block 0
+
+Seriam 21 blocos no total para 20 época, mas 19 blocos finalizados na blockchain
