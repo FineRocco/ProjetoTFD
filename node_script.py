@@ -30,6 +30,24 @@ def handle_incoming_messages(sock, node):
             with node.message_queue_lock:
                 node.message_queue.append(message)
 
+            # Start a new thread to process the message
+            threading.Thread(target=process_message_queue, args=(node,), daemon=True).start()
+
+def process_message_queue(node):
+    while node.running:
+        with node.message_queue_lock:
+            if node.message_queue:
+                confusion_end = node.confusion_start + node.confusion_duration - 1
+                if node.current_epoch < node.confusion_start or node.current_epoch > confusion_end:
+                    # Process messages outside the confusion period
+                    message = node.message_queue.pop(0)
+                    threading.Thread(target=process_message, args=(node,message,), daemon=True).start()
+                else:
+                    # Simulate message delay or reordering during confusion
+                    # For simplicity, we'll delay processing
+                    pass  # Skip processing messages during confusion
+        time.sleep(0.1)  # Adjust as needed
+
 def process_message(node, message):
     # Handle various message types
     if message.type == MessageType.PROPOSE:
@@ -64,18 +82,6 @@ def process_message(node, message):
         # Check notarization condition
         node.notarize_block(block)
         print(f"Node {node.node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
-
-    elif message.type == MessageType.ECHO_NOTARIZE:
-        # Update the node’s view of notarized blocks based on an echo message
-        block = message.content
-        if block.epoch not in node.notarized_blocks or block not in node.notarized_blocks[block.epoch]:
-            if block.epoch not in node.notarized_blocks:
-                node.notarized_blocks[block.epoch] = []
-            node.notarized_blocks[block.epoch].append(block)
-            # Add tx_id of transactions notarized via Echo
-            for tx_id in block.transactions.keys():
-                node.notarized_tx_ids.add(tx_id)
-            node.finalize_blocks()  # Re-check finalization criteria
 
     elif message.type == MessageType.ECHO_TRANSACTION:
         # Add echoed transaction to pending transactions if it’s new

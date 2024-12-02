@@ -8,11 +8,9 @@ class MessageType:
     """
     PROPOSE = "PROPOSE"
     VOTE = "VOTE"
-    ECHO_NOTARIZE = "ECHO_NOTARIZE"
     ECHO_TRANSACTION = "ECHO_TRANSACTION"
     QUERY_MISSING_BLOCKS = "QUERY_MISSING_BLOCKS"  # Request for missing blocks
     RESPONSE_MISSING_BLOCKS = "RESPONSE_MISSING_BLOCKS"  # Response with missing blocks
-    EPOCH_COMPLETE = "EPOCH_COMPLETE"  # Signal broadcasted at the end of each epoch
 
 class Message:
     """
@@ -97,7 +95,7 @@ class Message:
                 return None
 
             # Handle specific message types
-            if msg_type in [MessageType.PROPOSE, MessageType.ECHO_NOTARIZE, MessageType.VOTE]:
+            if msg_type in [MessageType.PROPOSE, MessageType.VOTE]:
                 if isinstance(content, dict):
                     content = Block.from_dict(content)
                 else:
@@ -162,20 +160,6 @@ class Message:
         - Message: A Message object of type VOTE.
         """
         return Message(MessageType.VOTE, block, sender)
-    
-    @staticmethod
-    def create_echo_notarize_message(block, sender):
-        """
-        Creates an ECHO_NOTARIZE message.
-
-        Parameters:
-        - block (Block): The block being notarized.
-        - sender (int): The ID of the sending node.
-
-        Returns:
-        - Message: A Message object of type ECHO_NOTARIZE.
-        """
-        return Message(MessageType.ECHO_NOTARIZE, block, sender)
     
     @staticmethod
     def create_echo_transaction_message(transaction, epoch, sender):

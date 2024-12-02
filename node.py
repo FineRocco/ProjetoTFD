@@ -56,13 +56,17 @@ class Node(threading.Thread):
         self.message_queue = []
         self.message_queue_lock = threading.Lock()
 
+    def get_next_leader(self, seed):
+        """Gets the next leader based on the provided seed."""
+        epoch_seed = f"{seed}-{self.current_epoch}"
+        random.seed(epoch_seed)  # Use a combined seed for variability
+        return random.randint(0, self.total_nodes - 1)
+
     def next_leader(self, seed):
         confusion_end = self.confusion_start + self.confusion_duration - 1
         if self.current_epoch < self.confusion_start or self.current_epoch > confusion_end:
             # Random leader selection
-            epoch_seed = f"{seed}-{self.current_epoch}"
-            random.seed(epoch_seed)
-            self.current_leader = random.randint(0, self.total_nodes - 1)
+            self.current_leader = self.get_next_leader(seed)
         else:
             # Deterministic leader selection during confusion
             self.current_leader = self.current_epoch % self.total_nodes
@@ -104,9 +108,6 @@ class Node(threading.Thread):
         # Determine current epoch based on the saved blockchain
         last_saved_epoch = max(block.epoch for block in self.blockchain) if self.blockchain else 0
         self.current_epoch = last_saved_epoch + 1
-        
-        # Start message processing thread
-        threading.Thread(target=self.process_message_queue, daemon=True).start()
 
         for epoch in range(self.current_epoch, self.total_epochs + 1):
             self.current_epoch = epoch
@@ -234,12 +235,6 @@ class Node(threading.Thread):
 
                 for tx_id in block.transactions.keys():
                     self.notarized_tx_ids.add(tx_id)
-
-                # Broadcast notarization to all nodes
-                echo_message = Message.create_echo_notarize_message(block, self.node_id)
-                threading.Thread(
-                target=self.broadcast_message, args=(echo_message,), daemon=True).start()
-                self.finalize_blocks()
 
     def finalize_blocks(self):
         print(f"Node {self.node_id}: Checking for finalization.")
@@ -493,116 +488,4 @@ class Node(threading.Thread):
             for tx_id, tx in block.transactions.items():  # Unpack tx_id and Transaction object
                 print(f"    Transaction {tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
             print("-" * 40)  # Separator for each block
-
-    def process_message_queue(self):
-        while self.running:
-            with self.message_queue_lock:
-                if self.message_queue:
-                    confusion_end = self.confusion_start + self.confusion_duration - 1
-                    if self.current_epoch < self.confusion_start or self.current_epoch > confusion_end:
-                        # Process messages outside the confusion period
-                        message = self.message_queue.pop(0)
-                        threading.Thread(target=self.process_message, args=(message,), daemon=True).start()
-                    else:
-                        # Simulate message delay or reordering during confusion
-                        # For simplicity, we'll delay processing
-                        pass  # Skip processing messages during confusion
-            time.sleep(0.1)  # Adjust as needed
-
-    def process_message(self, message):
-        # Handle various message types
-        if message.type == MessageType.PROPOSE:
-            # Vote on the received proposed block
-            block = message.content
-            self.vote_on_block(block)
-            print(f"Node {self.node_id} voted for block {block.hash.hex()}.")
-
-        elif message.type == MessageType.VOTE:
-            # Handle a vote on a block and update notarization if conditions are met
-            block = message.content
-            block_hash = block.hash.hex()
-            sender_id = message.sender  # Ensure the message includes sender ID
-
-            print(f"Node {self.node_id}: Received Vote from Node {sender_id} for Block {block_hash} in epoch {block.epoch}")
-
-            # Initialize vote tracking structures
-            if block_hash not in self.vote_counts:
-                self.vote_counts[block_hash] = 0
-            if block_hash not in self.voted_senders:
-                self.voted_senders[block_hash] = set()
-
-            # Check if this sender has already voted for this block
-            if sender_id not in self.voted_senders[block_hash]:
-                # Add vote and update vote counts
-                self.vote_counts[block_hash] += 1
-                self.voted_senders[block_hash].add(sender_id)
-                print(f"Node {self.node_id}: Updated vote count for Block {block_hash} to {self.vote_counts.get(block_hash, 0)}")
-            else:
-                print(f"Node {self.node_id}: Duplicate vote from Node {sender_id} for Block {block_hash}; ignoring.")
-
-            # Check notarization condition
-            self.notarize_block(block)
-            print(f"Node {self.node_id}: Checking notarization for Block {block_hash} with updated votes = {self.vote_counts.get(block_hash, 0)}")
-
-        elif message.type == MessageType.ECHO_NOTARIZE:
-            # Update the node’s view of notarized blocks based on an echo message
-            block = message.content
-            if block.epoch not in self.notarized_blocks or block not in self.notarized_blocks[block.epoch]:
-                if block.epoch not in self.notarized_blocks:
-                    self.notarized_blocks[block.epoch] = []
-                self.notarized_blocks[block.epoch].append(block)
-                # Add tx_id of transactions notarized via Echo
-                for tx_id in block.transactions.keys():
-                    self.notarized_tx_ids.add(tx_id)
-                self.finalize_blocks()  # Re-check finalization criteria
-
-        elif message.type == MessageType.ECHO_TRANSACTION:
-            # Add echoed transaction to pending transactions if it’s new
-            content = message.content
-            transaction = content['transaction']
-            epoch = content['epoch']
-            self.add_transaction(transaction, epoch)
-
-        elif message.type == MessageType.QUERY_MISSING_BLOCKS:
-            # Respond with missing blocks
-            last_epoch = message.content.get("last_epoch")
-            sender = message.sender
-            print(f"Node {self.node_id}: Received QUERY_MISSING_BLOCKS from Node {sender} with last_epoch {last_epoch}")
-
-            # Collect missing blocks from last_epoch + 1 to current_epoch
-            missing_blocks = []
-            for epoch in range(last_epoch + 1, self.current_epoch + 1):
-                if epoch in self.notarized_blocks:
-                    for block in self.notarized_blocks[epoch]:
-                        missing_blocks.append(block)
-
-            # Debugging: Print the missing blocks
-            print(f"Node {self.node_id}: Missing blocks to send to Node {sender}:")
-            for block in missing_blocks:
-                print(f"  Epoch {block.epoch}, Hash: {block.hash.hex()}")
-
-            # Send RESPONSE_MISSING_BLOCKS with the missing blocks
-            response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": [block.to_dict() for block in missing_blocks]}, self.node_id)
-            self.send_message_to_port(self.ports[sender], response_message)
-
-        elif message.type == MessageType.RESPONSE_MISSING_BLOCKS:
-            if self.recovery_completed:
-                print(f"Node {self.node_id}: Recovery already completed. Ignoring RESPONSE_MISSING_BLOCKS.")
-                return
-            
-            missing_blocks = message.content.get("missing_blocks", [])
-            # Add the missing blocks to the blockchain
-            for block_data in missing_blocks:
-                block = Block.from_dict(block_data)
-                if block.epoch not in self.notarized_blocks:
-                    self.notarized_blocks[block.epoch] = [block]
-                    self.blockchain.append(block)
-                    print(f"Node {self.node_id}: Recovered Block for epoch {block.epoch}")
-
-            # Check if recovery is now complete
-            if missing_blocks:
-                latest_recovered_epoch = max(block.epoch for block in self.blockchain)
-                if latest_recovered_epoch >= self.current_epoch - 1:
-                    self.recovery_completed = True
-                    print(f"Node {self.node_id}: Recovery completed after receiving missing blocks.")
 
