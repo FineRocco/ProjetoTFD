@@ -48,10 +48,14 @@ class Node(threading.Thread):
 
         self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions={})
 
-    def next_leader(self, seed):
+    def get_next_leader(self, seed):
+        """Gets the next leader based on the provided seed."""
         epoch_seed = f"{seed}-{self.current_epoch}"
         random.seed(epoch_seed)  # Use a combined seed for variability
-        self.current_leader = random.randint(0, self.total_nodes - 1)
+        return random.randint(0, self.total_nodes - 1)
+
+    def next_leader(self, seed):
+        self.current_leader = self.get_next_leader(seed)
         print(f"Node {self.node_id}: Leader for epoch {self.current_epoch} is Node {self.current_leader}")
         if (self.current_leader == self.node_id):
             self.propose_block(self.current_epoch)
@@ -96,10 +100,6 @@ class Node(threading.Thread):
             print(f"==================================== Epoch {epoch} ====================================")
             self.next_leader(self.seed)
             threading.Thread(target=self.generate_transactions_for_epoch,args=(epoch,),daemon=True).start()
-
-            # # Broadcast EPOCH_COMPLETE at the end of the epoch
-            # epoch_complete_message = Message(MessageType.EPOCH_COMPLETE, {"epoch": self.current_epoch}, self.node_id)
-            # self.broadcast_message(epoch_complete_message)
 
             time.sleep(self.epoch_duration)
 
@@ -222,10 +222,6 @@ class Node(threading.Thread):
                     self.notarized_tx_ids.add(tx_id)
                     #print(f"Node {self.node_id}: Transaction {tx_id} added to notarized_tx_ids.")
 
-                # Broadcast notarization to all nodes
-                echo_message = Message.create_echo_notarize_message(block, self.node_id)
-                threading.Thread(
-                target=self.broadcast_message,args=(echo_message,),daemon=True).start()
                 self.finalize_blocks()
 
     def finalize_blocks(self):
