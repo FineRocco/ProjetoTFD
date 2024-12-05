@@ -15,7 +15,7 @@ class Node(threading.Thread):
     Represents a blockchain node in a network running the Streamlet consensus protocol.
     Each node can propose, vote, and notarize blocks, and broadcasts messages to other nodes.
     """
-    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports, start_time, rejoin):
+    def __init__(self, node_id, total_nodes, total_epochs, delta, port, ports, start_time, rejoin, confusion_start=None, confusion_duration=None):
         super().__init__()
         self.node_id = node_id
         self.total_nodes = total_nodes
@@ -48,6 +48,14 @@ class Node(threading.Thread):
 
         self.genesis_block = Block(epoch=0, previous_hash=b'0' * 20, transactions={})
 
+        # Confusion variables
+        self.confusion_start = confusion_start if confusion_start is not None else -1
+        self.confusion_duration = confusion_duration if confusion_duration is not None else 0
+
+        # Message queue and lock
+        self.message_queue = []
+        self.message_queue_lock = threading.Lock()
+
     def get_next_leader(self, seed):
         """Gets the next leader based on the provided seed."""
         epoch_seed = f"{seed}-{self.current_epoch}"
@@ -55,9 +63,15 @@ class Node(threading.Thread):
         return random.randint(0, self.total_nodes - 1)
 
     def next_leader(self, seed):
-        self.current_leader = self.get_next_leader(seed)
+        confusion_end = self.confusion_start + self.confusion_duration - 1
+        if self.current_epoch < self.confusion_start or self.current_epoch > confusion_end:
+            # Random leader selection
+            self.current_leader = self.get_next_leader(seed)
+        else:
+            # Deterministic leader selection during confusion
+            self.current_leader = self.current_epoch % self.total_nodes
         print(f"Node {self.node_id}: Leader for epoch {self.current_epoch} is Node {self.current_leader}")
-        if (self.current_leader == self.node_id):
+        if self.current_leader == self.node_id:
             self.propose_block(self.current_epoch)
 
     def set_seed(self, seed):

@@ -27,7 +27,26 @@ def handle_incoming_messages(sock, node):
                 print(f"Deserialization failed in Node {node.node_id}. Ignoring message.")
                 continue
             print(f"Node {node.node_id} received command: {message.type}")
-            threading.Thread(target=process_message, args=(node, message), daemon=True).start()
+            # Enqueue the message
+            with node.message_queue_lock:
+                node.message_queue.append(message)
+
+            threading.Thread(target=process_message_queue, args=(node,), daemon=True).start()
+
+def process_message_queue(node):
+    while True:
+        with node.message_queue_lock:
+            if node.message_queue:
+                confusion_end = node.confusion_start + node.confusion_duration - 1
+                if node.current_epoch < node.confusion_start or node.current_epoch > confusion_end:
+                    # Process messages outside the confusion period
+                    message = node.message_queue.pop(0)
+                    threading.Thread(target=process_message, args=(node,message,), daemon=True).start()
+                else:
+                    # Simulate message delay or reordering during confusion
+                    # For simplicity, we'll delay processing
+                    pass  # Skip processing messages during confusion
+        time.sleep(0.1)  # Adjust as needed
 
 def process_message(node, message):
     # Handle various message types
@@ -145,6 +164,8 @@ def main():
     delta = network_config["delta"]
     start_time = network_config["start_time"]
     ports = network_config["ports"]
+    confusion_start = network_config.get("confusion_start", None)
+    confusion_duration = network_config.get("confusion_duration", None)
 
     print(f"Starting Node {node_id} with the following configuration:")
     print(f"Node ID: {node_id}")
@@ -154,7 +175,7 @@ def main():
     print(json.dumps(network_config, indent=4))
 
     # Initialize the Node
-    node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time, rejoin=rejoin)
+    node = Node(node_id=node_id, total_nodes=total_nodes, total_epochs = total_epochs, delta = delta, port=port, ports=ports, start_time=start_time, rejoin=rejoin, confusion_start=confusion_start, confusion_duration=confusion_duration)
     node.set_seed("toleranciaedfaltadeintrusoes")  # Set the seed for random leader selection
 
     # Start listening for commands on the designated port

@@ -3,5 +3,7 @@
     "total_epochs": 20,
     "delta": 4,
     "start_time": "00:00",
-    "ports": [5000, 5001, 5002, 5003, 5004]
+    "ports": [5000, 5001, 5002, 5003, 5004],
+    "confusion_start": 0,
+    "confusion_duration": 0
 }
