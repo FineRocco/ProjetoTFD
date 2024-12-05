@@ -64,18 +64,6 @@ def process_message(node, message):
         node.notarize_block(block)
         print(f"Node {node.node_id}: Checking notarization for Block {block_hash} with updated votes = {node.vote_counts.get(block_hash, 0)}")
 
-    # elif message.type == MessageType.ECHO_NOTARIZE:
-    #     # Update the node’s view of notarized blocks based on an echo message
-    #     block = message.content
-    #     if block.epoch not in node.notarized_blocks or node.notarized_blocks[block.epoch].hash != block.hash:
-    #         node.notarized_blocks[block.epoch] = block
-    #         # Adicionar tx_id das transações notarizadas via Echo
-    #         for tx_id in block.transactions.keys():
-    #             node.notarized_tx_ids.add(tx_id)
-    #             #print(f"Node {node_id}: Transaction {tx_id} added to notarized_tx_ids via Echo.")
-    #         #print(f"Node {node_id}: Updated notarization from Echo for Block {block.hash.hex()} in epoch {block.epoch}")
-    #         node.finalize_blocks()  # Re-check finalization criteria
-
     elif message.type == MessageType.ECHO_TRANSACTION:
         # Add echoed transaction to pending transactions if it’s new
         content = message.content
@@ -103,12 +91,9 @@ def process_message(node, message):
         for block in missing_blocks:
             print(f"  Epoch {block['epoch']}, Hash: {block['hash']}")
 
-        next_leader_id = node.get_next_leader(node.seed)
-
-        if (next_leader_id == node.node_id):
-            # Send RESPONSE_MISSING_BLOCKS with the missing blocks
-            response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": missing_blocks}, node.node_id)
-            node.send_message_to_port(sender, response_message)
+        # Send RESPONSE_MISSING_BLOCKS with the missing blocks
+        response_message = Message(MessageType.RESPONSE_MISSING_BLOCKS, {"missing_blocks": missing_blocks}, node.node_id)
+        node.send_message_to_port(sender, response_message)
 
     elif message.type == MessageType.RESPONSE_MISSING_BLOCKS:
         if node.recovery_completed:
