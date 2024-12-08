@@ -14,7 +14,7 @@
 
 ---
 
-# How to run
+## How to run
 
 1. Make sure all blockchain.json files are deleted
 
@@ -30,19 +30,19 @@ python3 node_script.py [node_id] [port number] [Rejoin flag] network_info.json`
 
 ---
 
-# Commands
+## Commands
 
-Script to delete all Json Files:
+### Script to delete all Json Files:
 ```
 python3 delete_blockchain_files.py
 ```
 
-Start each individual node with the node_id, port, rejoin flag and config file location:
+### Start each individual node with the node_id, port, rejoin flag and config file location:
 ```
 python3 node_script.py 1 5001 False network_info.json
 ```
 
-Command for crashed node with flag rejoin activated:
+### Command for crashed node with flag rejoin activated:
 ```
 python3 node_script.py 1 5001 True network_info.json
 ```
