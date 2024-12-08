@@ -59,14 +59,14 @@ Este projeto explora a implementação do protocolo de consenso Streamlet em um 
 1. Implementar o protocolo Streamlet, incluindo:
    - Proposta, votação, notarização e finalização de blocos.
 2. Criar um ambiente distribuído com múltiplos nós.
-3. Garantir tolerância a falhas de paragem.
+3. Garantir tolerância a falhas de crash.
 4. Gerar e processar transações consistentemente.
 
 ### Segunda Fase
 1. Lidar com nós atrasados e perda de épocas.
 2. Implementar capacidades de crash-recovery.
 3. Gerir forks na blockchain.
-4. Assegurar robustez contra desafios práticos.
+4. Periodos de Confusão.
 
 ---
 
