@@ -1,8 +1,8 @@
 # Projeto de Tolerância a Faltas Distribuída - Protocolo Streamlet
 
-Faculdade de Ciências da Universidade de Lisboa
-Departamento de Informática  
-Mestrado em Engenharia Informática  
+**Faculdade de Ciências da Universidade de Lisboa**
+**Departamento de Informática**  
+**Mestrado em Engenharia Informática** 
 
 **Autores**:  
 - Rodrigo Craveiro Rodrigues (Nº 64370)  
