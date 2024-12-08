@@ -91,14 +91,11 @@ class Node(threading.Thread):
 
         # Determine if the node is rejoining or starting fresh
         if self.rejoin:
-            if self.blockchain:
-                # Rejoining node recovers its state
-                print(f"Node {self.node_id}: Detected existing blockchain. Recovering...")
-                self.recover_blockchain()
-            else:
-                print(f"Node {self.node_id}: No blockchain found. Starting from genesis.")
-                self.notarized_blocks[0] = self.genesis_block
-                self.blockchain.append(self.genesis_block)
+            # Rejoining node recovers its state
+            print(f"Node {self.node_id}: Recovering...")
+            self.notarized_blocks[0] = self.genesis_block
+            self.blockchain.append(self.genesis_block)
+            self.recover_blockchain()
         else:
             # New node adds the genesis block
             if not self.blockchain:
