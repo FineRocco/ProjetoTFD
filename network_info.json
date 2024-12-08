@@ -2,8 +2,8 @@
     "num_nodes": 5,
     "total_epochs": 20,
     "delta": 4,
-    "start_time": "00:00",
-    "ports": [5002, 5003, 5004, 5005, 5006],
+    "start_time": "11:18",
+    "ports": [5000, 5001, 5002, 5003, 5004],
     "confusion_start": 5,
-    "confusion_duration": 3
+    "confusion_duration": 3 
 }

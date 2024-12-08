@@ -12,28 +12,37 @@ This project implements the Streamlet consensus algorithm, a protocol for achiev
 
 ## Comands
 
-Delete Json Files:
+Start each individual node with the node_id, port, rejoin flag and config file location:
 
-& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/delete_blockchain_files.py
+`python3 node_script.py 1 5001 False network_info.json`
 
-Start main with all nodes terminal with the config file location:
+Command for crashed node with flag rejoin activated:
 
-& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/main.py --network_config_file network_info.json
+`python3 node_script.py 1 5001 True network_info.json`
 
-Command to open individual node with flag rejoin activated:
+Script to delete all Json Files:
 
-& C:/Users/l3tim/AppData/Local/Microsoft/WindowsApps/python3.11.exe c:/Users/l3tim/Desktop/TFD/ProjetoTFD/ProjetoTFD/node_script.py 1 5001 True network_info.json
+`python3 delete_blockchain_files.py`
+
+## How to run
+
+1. Make sure all blockchain.json files are deleted
+
+2. Configure the network_info.json file with the desired values (num_node [int]; total_epochs[int]; delta[int]; start_time[hh:mm]; ports[List<int>]; confusion_start[int], confusion_duration[int])
+
+3. Open the terminals and run in each one: `python3 node_script.py [node_id] [port number] [Rejoin flag] network_info.json`
+NOTE: Make sure to set start_time with a minimum 2 minutes delay from current time.
+
+4. Wait for the epochs to complete to see the displayed blockchain or you can observe the blockchain_[i].json during the process
 
 
 ### Key Components
 
-- **`streamletnetwork.py`**: Manages the network of nodes, leader rotation, and transaction distribution.
 - **`transaction.py`**: Defines the structure of transactions, each containing an ID, sender, receiver, and amount.
 - **`block.py`**: Represents a block in the Blockchain, storing transactions, the epoch number, and a link to the previous block through its hash.
 - **`node.py`**: Represents each node in the network, handling block proposals, voting, notarization, and blockchain management.
 - **`node_script.py`**: Main function for running a single node in the network.
 - **`message.py`**: Defines message types for communication between nodes, including transactions, votes, proposals, and notarizations.
-- **`main.py`**: Entry point for configuring and running the Streamlet protocol simulation.
 
 ### Features
 
@@ -41,40 +50,10 @@ Command to open individual node with flag rejoin activated:
 - **Leader Rotation**: Rotates leader roles each epoch, enabling fair participation in proposing blocks.
 - **Consensus Mechanism**: Ensures nodes reach agreement on the blockchain state through voting and notarization.
 - **Blockchain Persistence**: Nodes can save and recover the blockchain state, preserving transaction history.
-
-### Running the Simulation
-
-To run the simulation, follow these steps:
-
-1. **Clone the Repository**: Clone the project repository to your local machine.
-
-2. **Execute `main.py`**:
-    Run the following command with deafult parameters: 5 nodes, 10 epochs, 2 seconds delta.
-    ```bash
-    python main.py
-    ```
-    OR
-    Run the following command in the terminal with customizable parameters for nodes, epochs, and network delay:
-    ```bash
-    python main.py --num_nodes <NUMBER_OF_NODES> --total_epochs <TOTAL_EPOCHS> --delta <NETWORK_DELAY>
-    ```
-
-3. **Observe Outputs**:
- - The protocol will output each node's actions, including transaction generation, block proposals, voting, and finalization.
- - The simulation will also show the finalized blockchain at each node upon completion.
+- **Forks Management**: Nodes select the longest chain between the forks abd merge
+- **Confusion Period**: It simulates a confusion in the network with multiple leaders in the same epoch and creates new forks for testing the robustness of the blockchain
 
 # Code Overview
-
-## `main.py`
-- **Argument Parsing**: Allows customization of the number of nodes, epochs, and network delay for the Streamlet protocol.
-- **Network Initialization**: Creates and starts the `StreamletNetwork` with specified parameters.
-- **Epoch Execution**: Runs the protocol for a given number of epochs, rotating leaders and generating transactions.
-- **Network Termination**: Stops the network after all epochs are completed and finalizes the blockchain display.
-
-## `StreamletNetwork`
-- **Network Setup**: Initializes multiple nodes, assigns leader roles, and starts a transaction generation thread.
-- **Epoch Management**: Handles leader rotation and initiates block proposals each epoch.
-- **Transaction Broadcasting**: Ensures transactions are evenly distributed across nodes in the network.
 
 ## `Node`
 - **Block Proposal**: The leader node for each epoch proposes a block containing the list of pending transactions.
@@ -84,43 +63,15 @@ To run the simulation, follow these steps:
 
 ## `Message`
 - **Serialization**: Manages serialization and deserialization of messages between nodes, including block proposals, votes, and transactions.
-- **Message Types**: Defines `MessageType` constants for organized communication (`START_PORPOSAL`,`PROPOSE`, `VOTE`, `TRANSACTION`, `ECHO_TRANSACTION`, `ECHO_NOTARIZE`, `DISPLAY_BLOCKCHAIN`).
+- **Message Types**: Defines `MessageType` constants for organized communication (`PROPOSE`, `VOTE`, `ECHO_TRANSACTION`, `QUERY_MISSING_BLOCKS`, `RESPONSE_MISSING_BLOCKS`).
 
 ## `node_script.py`
-- **Node Initialization**: Initializes an individual node, loads configuration parameters, and signals readiness to the Streamlet Network.
+- **Node Initialization**: Initializes an individual node, loads configuration parameters
 - **Message Handling**: Processes different message types received by the node.
-  - **START_PROPOSAL**: Initiates a block proposal if the node is the designated leader for the current epoch.
   - **PROPOSE**: Receives and votes on proposed blocks from other nodes.
   - **VOTE**: Tracks votes for blocks, updates notarizations, and ensures no duplicate votes from the same node.
-  - **ECHO_NOTARIZE**: Processes echoed notarizations to update the node’s view of the blockchain.
-  - **TRANSACTION**: Adds new transactions to pending transactions and broadcasts them.
   - **ECHO_TRANSACTION**: Adds echoed transactions to ensure consistent transaction state across nodes.
-  - **DISPLAY_BLOCKCHAIN**: Outputs the current blockchain state to the console.
+  - **QUERY_MISSING_BLOCKS**: Requests the missing blocks by sending the last saved epoch when flag rejoin activated.
+  - **RESPONSE_MISSING_BLOCKS**: Responds to the rejoin request by calculating the missing blocks and sending them.
 - **Error Handling**: Logs and handles potential exceptions during message processing to maintain robustness.
-
-## `Professor`
-
-Retirar prints, so interesaa a blockchain
-
-20 epocas, so pode ter 19 blocos finalizados
-
-fazer testes com 2 nos a crashar
-
-O terminal main do streamlet network devia desaparecer depois de iniciar a blockhcain. 
-
-Os nós deviam gerar as transactions
-
-A network tem de definjr uma seed para o random e passa a seed para todos os nós, e cada nó usa a seed para gerar um numero random para definir o lider entre eles. O prof disse
-
-A network server para iniciar a blockchain e depois fechar
-
-Deviamos usar os mesmos sockets, sem abrir e fechar sockets para cada broadcast que fazemos. O prof disse
-
-Começar com um tempo definido para arrancar  & uma lista de ip, ports e node_id & configurações (nu_nodes, num_epocas, delta)
-
-Quando um broadcast é feito e um nó crashou, os outros nó definem esse socket como null e o próximo broadcast os tentam connectar de novo a esse
-
-O genesis block é o block 0
-
-Seriam 21 blocos no total para 20 época, mas 19 blocos finalizados na blockchain
 
