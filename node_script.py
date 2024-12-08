@@ -27,7 +27,6 @@ def handle_incoming_messages(sock, node):
                 print(f"Deserialization failed in Node {node.node_id}. Ignoring message.")
                 continue
             print(f"Node {node.node_id} received command: {message.type}")
-            # Enqueue the message
             with node.message_queue_lock:
                 node.message_queue.append(message)
 
@@ -37,16 +36,18 @@ def process_message_queue(node):
     while True:
         with node.message_queue_lock:
             if node.message_queue:
-                confusion_end = node.confusion_start + node.confusion_duration - 1
-                if node.current_epoch < node.confusion_start or node.current_epoch > confusion_end:
-                    # Process messages outside the confusion period
-                    message = node.message_queue.pop(0)
-                    threading.Thread(target=process_message, args=(node,message,), daemon=True).start()
+                if node.is_confusion_active(node.current_epoch):
+                    if random.random() < 0.5: 
+                        print(f"Node {node.node_id}: Delaying message processing during confusion.")
+                        time.sleep(random.uniform(0.5, 2)) 
+                    else:
+                        message = node.message_queue.pop(0)
+                        node.message_queue.append(message)
+                        print(f"Node {node.node_id}: Reordered message queue during confusion.")
                 else:
-                    # Simulate message delay or reordering during confusion
-                    # For simplicity, we'll delay processing
-                    pass  # Skip processing messages during confusion
-        time.sleep(0.1)  # Adjust as needed
+                    message = node.message_queue.pop(0)
+                    threading.Thread(target=process_message, args=(node, message), daemon=True).start()  # Troque self por node
+        time.sleep(0.1)
 
 def process_message(node, message):
     # Handle various message types

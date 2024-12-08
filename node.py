@@ -113,6 +113,16 @@ class Node(threading.Thread):
             self.current_epoch = epoch
             print(f"==================================== Epoch {epoch} ====================================")
             self.next_leader(self.seed)
+
+            if self.is_confusion_active(epoch):
+                print(f"Node {self.node_id}: Entering confusion period during epoch {epoch}.")
+            else:
+                print(f"Node {self.node_id}: Normal operation during epoch {epoch}.")
+
+            if epoch == self.confusion_start + self.confusion_duration - 1:
+                print(f"Node {self.node_id}: Ending confusion period. Resolving forks.")
+                self.resolve_forks()
+            
             threading.Thread(target=self.generate_transactions_for_epoch,args=(epoch,),daemon=True).start()
 
             time.sleep(self.epoch_duration)
@@ -135,6 +145,22 @@ class Node(threading.Thread):
             start_datetime = now  # Start now
         
         return start_datetime
+
+    def resolve_forks(self):
+        """
+        Resolve forks by choosing the longest notarized chain.
+        """
+        print(f"Node {self.node_id}: Resolving forks after confusion.")
+        notarized_epochs = sorted(self.notarized_blocks.keys())
+        longest_chain = []
+
+        for epoch in notarized_epochs:
+            block = self.notarized_blocks[epoch]
+            if block not in longest_chain:
+                longest_chain.append(block)
+
+        self.blockchain = longest_chain
+        print(f"Node {self.node_id}: Forks resolved. Blockchain synchronized.")
 
     def wait_for_start(self, start_datetime):
         """
@@ -201,7 +227,7 @@ class Node(threading.Thread):
                 self.voted_senders[block_hash].add(self.node_id)
                 print(f"Node {self.node_id} voted for Block {block_hash} in epoch {block.epoch}")
             else:
-                print(f"Node {self.node_id} já votou para Block {block_hash} em epoch {block.epoch}")
+                print(f"Node {self.node_id} Block already voted {block_hash} on epoch {block.epoch}")
                 return
 
         # Broadcast vote to all nodes
@@ -365,11 +391,24 @@ class Node(threading.Thread):
         for _ in range(num_transactions):
             self.generate_random_transaction_for_epoch(epoch)
 
+    def is_confusion_active(self, epoch):
+        return self.confusion_start <= epoch < self.confusion_start + self.confusion_duration
+
     def broadcast_message(self, message):
         serialized_message = message.serialize()
         for target_port in self.ports:
             if target_port != self.port:
                 try:
+                    if self.is_confusion_active(self.current_epoch):
+                        if random.random() < 0.2:  
+                            print(f"Node {self.node_id}: Dropped broadcast to port {target_port} during confusion.")
+                            continue
+
+                        if random.random() < 0.3: 
+                            delay = random.uniform(1, 3)
+                            print(f"Node {self.node_id}: Delayed broadcast to port {target_port} by {delay:.2f} seconds.")
+                            time.sleep(delay)
+
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         print(f"Node {self.node_id} broadcasting to port {target_port}")
                         s.connect(('localhost', target_port))
