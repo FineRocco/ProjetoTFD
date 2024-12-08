@@ -1,6 +1,6 @@
-# Projeto de Tolerância a Faltas Distribuída - Protocolo Streamlet (Fase 2)
+# Projeto de Tolerância a Faltas Distribuída - Protocolo Streamlet
 
-Faculdade de Ciências da Universidade de Lisboa  
+Faculdade de Ciências da Universidade de Lisboa
 Departamento de Informática  
 Mestrado em Engenharia Informática  
 
@@ -10,7 +10,7 @@ Mestrado em Engenharia Informática
 - Ana Luís (Nº 53563)  
 
 **Professor**: Doutor Alysson Bessani  
-**Período**: 1º Semestre Letivo 2024/2025  
+**1º Semestre Letivo 2024/2025** 
 
 ---
 
