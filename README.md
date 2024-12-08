@@ -14,25 +14,6 @@
 
 ---
 
-# Commands
-
-Start each individual node with the node_id, port, rejoin flag and config file location:
-```
-python3 node_script.py 1 5001 False network_info.json
-```
-
-Command for crashed node with flag rejoin activated:
-```
-python3 node_script.py 1 5001 True network_info.json
-```
-
-Script to delete all Json Files:
-```
-python3 delete_blockchain_files.py
-```
-
---- 
-
 # How to run
 
 1. Make sure all blockchain.json files are deleted
@@ -48,6 +29,25 @@ python3 node_script.py [node_id] [port number] [Rejoin flag] network_info.json`
 4. Wait for the epochs to complete to see the displayed blockchain or you can observe the blockchain_[i].json during the process
 
 ---
+
+# Commands
+
+Script to delete all Json Files:
+```
+python3 delete_blockchain_files.py
+```
+
+Start each individual node with the node_id, port, rejoin flag and config file location:
+```
+python3 node_script.py 1 5001 False network_info.json
+```
+
+Command for crashed node with flag rejoin activated:
+```
+python3 node_script.py 1 5001 True network_info.json
+```
+
+--- 
 
 ## Introdução
 Este projeto explora a implementação do protocolo de consenso Streamlet em um sistema distribuído, com foco na tolerância a falhas. Na segunda fase, a ênfase foi colocada em enfrentar desafios práticos, como nós atrasados, perda de épocas, crash-recovery e forks na blockchain, garantindo convergência para uma cadeia consistente.
