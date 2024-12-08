@@ -74,7 +74,7 @@ Este projeto explora a implementação do protocolo de consenso Streamlet em um 
 ### Protocolo Streamlet
 - **Funcionamento**:
   - Divisão em épocas com líder rotativo.
-  - Propostas, notarizações e finalizações de blocos.
+  - Propostas, votos, notarizações e finalizações de blocos.
 - **Propriedades**:
   - Simplicidade e eficiência.
   - Tolerância a falhas de paragem com até t falhas (n ≥ 2t + 1).
