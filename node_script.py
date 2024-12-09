@@ -42,30 +42,13 @@ def handle_incoming_messages(sock, node):
             threading.Thread(target=process_message_queue, args=(node,), daemon=True).start()
 
 def process_message_queue(node):
-    """
-    Processes messages from the node's message queue.
-
-    This function handles message ordering and delays during confusion periods.
-
-    :param node: Node - The current node instance.
-    """
     while True:
         with node.message_queue_lock:
             if node.message_queue:
-                if node.is_confusion_active(node.current_epoch):
-                    # Simulate delays and reordering during confusion
-                    if random.random() < 0.5:  # 50% chance to delay processing
-                        print(f"Node {node.node_id}: Delaying message processing during confusion.")
-                        time.sleep(random.uniform(0.5, 2))
-                    else:  # Simulate reordering
-                        message = node.message_queue.pop(0)
-                        node.message_queue.append(message)
-                        print(f"Node {node.node_id}: Reordered message queue during confusion.")
-                else:
-                    # Process the first message in the queue
-                    message = node.message_queue.pop(0)
-                    threading.Thread(target=process_message, args=(node, message), daemon=True).start()
-        time.sleep(0.1)  # Prevent CPU overutilization
+                message = node.message_queue.pop(0)
+                threading.Thread(target=process_message, args=(node,message,), daemon=True).start()
+        
+        time.sleep(0.1)  
 
 def process_message(node, message):
     """
@@ -77,6 +60,7 @@ def process_message(node, message):
     if message.type == MessageType.PROPOSE:
         # Handle a proposed block
         block = message.content
+        print(f"Node {node.node_id}: Received PROPOSE for Block {block.hash.hex()} in epoch {block.epoch}.")
         node.vote_on_block(block)
 
     elif message.type == MessageType.VOTE:
@@ -84,8 +68,6 @@ def process_message(node, message):
         block = message.content
         block_hash = block.hash.hex()
         sender_id = message.sender
-
-        print(f"Node {node.node_id}: Received Vote from Node {sender_id}")
 
         # Update vote tracking
         if block_hash not in node.vote_counts:
@@ -171,7 +153,7 @@ def main():
     total_nodes = network_config["num_nodes"]
     total_epochs = network_config["total_epochs"]
     delta = network_config["delta"]
-    start_time = network_config["start_time"]
+    start_time = (datetime.now() + timedelta(minutes=1)).strftime("%H:%M")
     ports = network_config["ports"]
     confusion_start = network_config.get("confusion_start", None)
     confusion_duration = network_config.get("confusion_duration", None)

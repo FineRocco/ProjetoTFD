@@ -24,7 +24,9 @@ class Node(threading.Thread):
         self.epoch_duration = 2 * delta  # Duration of each epoch based on the delta parameter
         self.start_time = start_time  # Start time for the protocol
         self.rejoin = rejoin  # Indicates whether the node is rejoining the network
-
+        self.pending_proposes= {}
+        self.confusion_notarized = False  # Indicates if confusion blocks have been resolved
+        
         # Leader and consensus-related properties
         self.current_leader = -1  # ID of the current leader for the epoch
         self.current_epoch = 1  # Current epoch number
@@ -33,6 +35,8 @@ class Node(threading.Thread):
         self.tx_id_lock = threading.Lock()  # Lock for thread-safe transaction ID generation
         self.lock = threading.Lock()  # General-purpose lock for thread-safe operations
         self.message_queue_lock = threading.Lock()  # Lock for managing the message queue
+        self.pending_votes_lock = threading.Lock()  # Lock for managing the message queue
+        self.pending_proposes_lock = threading.Lock()  # Lock for managing the message queue
 
         # Transaction and voting data
         self.global_tx_id = 0  # Counter for transaction IDs
@@ -121,31 +125,18 @@ class Node(threading.Thread):
         last_saved_epoch = max(block.epoch for block in self.blockchain) if self.blockchain else 0
         self.current_epoch = last_saved_epoch + 1
 
+
         for epoch in range(self.current_epoch, self.total_epochs + 1):
             self.current_epoch = epoch
             print(f"==================================== Epoch {epoch} ====================================")
-            
-            # Determine the leader and propose a block if necessary
+        
+
+            if epoch == self.confusion_start + self.confusion_duration:
+                self.resolve_confusion()  # Resolve confusion when the period ends
+
             self.next_leader(self.seed)
-
-            if self.is_confusion_active(epoch):
-                print(f"Node {self.node_id}: Entering confusion period during epoch {epoch}.")
-            else:
-                print(f"Node {self.node_id}: Normal operation during epoch {epoch}.")
-
-            # End of confusion period: Resolve forks in the blockchain
-            if epoch == self.confusion_start + self.confusion_duration - 1:
-                print(f"Node {self.node_id}: Ending confusion period. Resolving forks.")
-                self.resolve_forks()
-
-            # Generate transactions for the epoch
             threading.Thread(target=self.generate_transactions_for_epoch, args=(epoch,), daemon=True).start()
-
-            # Wait for the epoch duration
             time.sleep(self.epoch_duration)
-
-            # Save the blockchain to persistent storage
-            self.save_blockchain()
 
         # Display the final blockchain state
         self.display_blockchain()
@@ -168,29 +159,6 @@ class Node(threading.Thread):
         
         return start_datetime
 
-    def resolve_forks(self):
-        """
-        Resolve forks by choosing the longest notarized chain.
-
-        During a fork in the blockchain, this function selects the longest chain of
-        blocks from the notarized blocks. This ensures all nodes have a consistent
-        view of the blockchain.
-        """
-        print(f"Node {self.node_id}: Resolving forks after confusion.")
-
-        # Collect all notarized blocks in order of their epochs
-        notarized_epochs = sorted(self.notarized_blocks.keys())
-        longest_chain = []
-
-        # Construct the longest chain by iterating through notarized blocks
-        for epoch in notarized_epochs:
-            block = self.notarized_blocks[epoch]
-            if block not in longest_chain:
-                longest_chain.append(block)
-
-        # Replace the local blockchain with the resolved chain
-        self.blockchain = longest_chain
-
     def wait_for_start(self, start_datetime):
         """
         Wait until the specified start_datetime.
@@ -207,40 +175,68 @@ class Node(threading.Thread):
         else:
             print(f"Start time {start_datetime} is now or has passed. Starting immediately.")
 
+    def recover_blockchain(self):
+        """
+        Reconciliar blockchain após confusão, conectando bifurcações.
+        """
+        print(f"Node {self.node_id}: Reconciling blockchain after confusion.")
+        for epoch, block in self.notarized_blocks.items():
+            if block not in self.blockchain:
+                chain = self.get_chain_to_block(block)
+                self.blockchain.extend(chain)
+        print(f"Node {self.node_id}: Blockchain reconciled successfully.")
+        
     def propose_block(self, epoch):
         """
-        Proposes a new block at the start of an epoch if the node is the leader.
-
-        This function creates a new block, initializes it with transactions, and broadcasts
-        the proposal to the network. Only the current leader of the epoch performs this action.
+        Proposes a block for the current epoch. During confusion, uses the correct parent block.
         """
         if epoch == 0:
             print("Genesis block is already set; skipping proposal for epoch 0.")
             return None
 
-        # Get the latest notarized block as the parent block
-        previous_block = self.get_longest_notarized_chain()
-        previous_hash = previous_block.hash if previous_block else b'1' * 20  # Use a placeholder hash if no parent exists
+        confusion_end = self.confusion_start + self.confusion_duration - 1
+        previous_block = None
 
-        # Lock to ensure thread-safe access to shared data
+        if epoch <= confusion_end:
+            # During confusion, all blocks use the same parent (genesis or block before confusion)
+            if epoch in self.notarized_blocks:
+                previous_block = self.notarized_blocks[epoch - 1]
+            else:
+                previous_block = self.genesis_block
+            print(f"Node {self.node_id}: Using {previous_block.hash.hex()} as parent during confusion.")
+        else:
+            previous_block = self.get_longest_notarized_chain()
+            print(f"Node {self.node_id}: Resolving confusion, choosing Block {previous_block.hash.hex()} as parent.")
+
+        previous_hash = previous_block.hash if previous_block else self.genesis_block.hash
+
+        # Create the block
         with self.lock:
-            # Retrieve and prepare transactions for the new block
             block_transactions = self.pending_transactions.get(epoch, []).copy()
             new_block = Block(epoch, previous_hash, {tx.tx_id: tx for tx in block_transactions})
-            
-            # Clear pending transactions for the epoch after proposing
+
             if epoch in self.pending_transactions:
                 del self.pending_transactions[epoch]
 
-        # Display details of the proposed block
         print(f"Node {self.node_id} proposes Block: {new_block.hash.hex()} with previous hash {previous_hash.hex()} and transactions {list(new_block.transactions.keys())}")
-        
-        # Vote on the proposed block
-        self.vote_on_block(new_block)
+        # If confusion is active, store the block in confusion_blocks
+        if self.is_confusion_active(epoch):
+            self.pending_proposes[epoch] = new_block
+            return
+        else:
+            self.vote_on_block(new_block)
 
-        # Create and broadcast a "Propose" message to the network
+        # Broadcast the proposal
         propose_message = Message.create_propose_message(new_block, self.node_id)
         threading.Thread(target=self.broadcast_message, args=(propose_message,), daemon=True).start()
+
+    def resolve_confusion(self):
+        if not self.confusion_notarized:
+            print(f"Node {self.node_id}: Resolving confusion and notarizing blocks from confusion period.")
+            for epoch, block in self.pending_proposes.items():
+                self.notarized_blocks[epoch] = block
+                print(f"Node {self.node_id}: Notarized Block {block.hash.hex()} from confusion epoch {epoch}.")
+            self.confusion_notarized = True  # Mark confusion blocks as processed
 
     def vote_on_block(self, block):
         """
@@ -280,10 +276,8 @@ class Node(threading.Thread):
 
     def notarize_block(self, block):
         """
-        Notarizes a block if it receives more than n/2 votes, and notifies other nodes.
-
-        This function validates that a block has received sufficient votes to be
-        notarized. If so, it updates the node's state and processes related transactions.
+        Notariza um bloco se ele receber mais votos do que n/2.
+        Durante o período de confusão, evita finalizações prematuras.
         """
         with self.lock:
             block_hash = block.hash.hex()
@@ -297,38 +291,35 @@ class Node(threading.Thread):
                 self.notarized_blocks[block.epoch] = block
                 print(f"Node {self.node_id}: Block {block_hash} notarized in epoch {block.epoch} with transactions {list(block.transactions.keys())}")
 
-                # Add transaction IDs to the notarized set
+                # Adicionar transações notarizadas
                 for tx_id in block.transactions.keys():
                     self.notarized_tx_ids.add(tx_id)
 
-                # Attempt to finalize blocks
+                # Tentar finalizar blocos
                 self.finalize_blocks()
 
     def finalize_blocks(self):
         """
         Finalizes blocks when three consecutive notarized blocks are observed.
-
-        This ensures the blockchain's immutability by finalizing blocks that are unlikely
-        to be replaced.
+        Ensures blocks are finalized in order, maintaining chain consistency.
         """
         notarized_epochs = sorted(self.notarized_blocks.keys())
+        for i in range(len(notarized_epochs) - 2):  # At least three blocks
+            first_epoch = notarized_epochs[i]
+            second_epoch = notarized_epochs[i + 1]
+            third_epoch = notarized_epochs[i + 2]
 
-        for i in range(2, len(notarized_epochs)):
-            # Check for three consecutive notarized epochs
-            if (notarized_epochs[i] == notarized_epochs[i - 1] + 1 and
-                notarized_epochs[i - 1] == notarized_epochs[i - 2] + 1):
-                
-                # Finalize the middle block in the sequence
-                second_epoch = notarized_epochs[i - 1]
-                finalized_block = self.notarized_blocks[second_epoch]
-
-                if finalized_block not in self.blockchain:
-                    print(f"Node {self.node_id}: Finalizing Block {finalized_block.hash.hex()} in epoch {finalized_block.epoch}")
+            # Check for three consecutive notarized blocks
+            if (
+                third_epoch == second_epoch + 1 and
+                second_epoch == first_epoch + 1
+            ):
+                block_to_finalize = self.notarized_blocks[first_epoch]
+                if block_to_finalize not in self.blockchain:
+                    print(f"Node {self.node_id}: Finalizing Block {block_to_finalize.hash.hex()} in epoch {first_epoch}")
+                    self.blockchain.extend(self.get_chain_to_block(block_to_finalize))
+                    self.save_blockchain()
                     
-                    # Add the finalized block and its parent chain to the blockchain
-                    chain = self.get_chain_to_block(finalized_block)
-                    self.blockchain.extend(chain)
-        
     def get_chain_to_block(self, block):
         """
         Constructs the chain leading to the given block.
@@ -355,18 +346,22 @@ class Node(threading.Thread):
         return chain
 
     def get_longest_notarized_chain(self):
-        """
-        Retrieves the latest block from the longest notarized chain.
-
-        This method finds the block corresponding to the highest epoch in the
-        node's notarized blocks.
-
-        :return: Block or None - The latest block in the longest notarized chain.
-        """
         with self.lock:
             if not self.notarized_blocks:
-                return None  # No notarized blocks available
-            latest_epoch = max(self.notarized_blocks.keys())  # Find the latest epoch
+                return self.genesis_block
+            
+            if self.current_epoch > self.confusion_start + self.confusion_duration:
+                # After confusion, return the first notarized block from the confusion period
+                notarized_during_confusion = {
+                    epoch: block for epoch, block in self.notarized_blocks.items()
+                    if self.confusion_start <= epoch < self.confusion_start + self.confusion_duration
+                }
+                if notarized_during_confusion:
+                    chosen_epoch = min(notarized_during_confusion.keys())
+                    return notarized_during_confusion[chosen_epoch]
+
+            # Default: Return the latest notarized block
+            latest_epoch = max(self.notarized_blocks.keys())
             return self.notarized_blocks[latest_epoch]
 
     def add_transaction(self, transaction, epoch):
@@ -466,27 +461,10 @@ class Node(threading.Thread):
         return self.confusion_start <= epoch < self.confusion_start + self.confusion_duration
 
     def broadcast_message(self, message):
-        """
-        Broadcasts a message to all other nodes in the network.
-
-        If confusion is active, the message may be delayed, dropped, or altered
-        to simulate network issues.
-
-        :param message: Message - The message to broadcast.
-        """
         serialized_message = message.serialize()
         for target_port in self.ports:
-            if target_port != self.port:  # Skip broadcasting to itself
+            if target_port != self.port:
                 try:
-                    # Simulate confusion with dropped or delayed messages
-                    if self.is_confusion_active(self.current_epoch):
-                        if random.random() < 0.2:  # 20% chance to drop the message
-                            continue
-                        if random.random() < 0.3:  # 30% chance to delay the message
-                            delay = random.uniform(1, 3)
-                            time.sleep(delay)
-
-                    # Send the message over a socket
                     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                         s.connect(('localhost', target_port))
                         s.sendall(serialized_message)
@@ -652,5 +630,4 @@ class Node(threading.Thread):
                 print(f"    Transaction {tx_id}: from {tx.sender} to {tx.receiver} of {tx.amount} coins")
             
             # Add a separator for readability
-            print("-" * 40)
-
+            print("-" * 40) 
