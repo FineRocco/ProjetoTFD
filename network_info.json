@@ -1,0 +1,9 @@
+
+{
+    "num_nodes": 5,
+    "total_epochs": 20,
+    "delta": 4,
+    "ports": [5001, 5002, 5003, 5004, 5005],
+    "confusion_start": 1,
+    "confusion_duration": 5
+}
