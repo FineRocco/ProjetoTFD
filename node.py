@@ -130,7 +130,6 @@ class Node(threading.Thread):
             self.current_epoch = epoch
             print(f"==================================== Epoch {epoch} ====================================")
         
-
             if epoch == self.confusion_start + self.confusion_duration:
                 self.resolve_confusion()  # Resolve confusion when the period ends
 
@@ -198,7 +197,6 @@ class Node(threading.Thread):
         previous_block = None
 
         if epoch <= confusion_end:
-            # During confusion, all blocks use the same parent (genesis or block before confusion)
             if epoch in self.notarized_blocks:
                 previous_block = self.notarized_blocks[epoch - 1]
             else:
@@ -348,19 +346,8 @@ class Node(threading.Thread):
     def get_longest_notarized_chain(self):
         with self.lock:
             if not self.notarized_blocks:
-                return self.genesis_block
+                return self.genesis_block 
             
-            if self.current_epoch > self.confusion_start + self.confusion_duration:
-                # After confusion, return the first notarized block from the confusion period
-                notarized_during_confusion = {
-                    epoch: block for epoch, block in self.notarized_blocks.items()
-                    if self.confusion_start <= epoch < self.confusion_start + self.confusion_duration
-                }
-                if notarized_during_confusion:
-                    chosen_epoch = min(notarized_during_confusion.keys())
-                    return notarized_during_confusion[chosen_epoch]
-
-            # Default: Return the latest notarized block
             latest_epoch = max(self.notarized_blocks.keys())
             return self.notarized_blocks[latest_epoch]
 
